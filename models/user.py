@@ -1,5 +1,4 @@
 from sqlalchemy import Column, BigInteger, String, DateTime, Enum as SQLEnum
-from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 from config.database import Base
