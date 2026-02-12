@@ -1,0 +1,8 @@
+langgraph
+streamlit
+pandas
+langchain_core
+transformers
+python-dotenv
+langchain_google_genai
+torch
