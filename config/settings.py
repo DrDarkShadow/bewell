@@ -5,19 +5,52 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings:
-    # AWS
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    """Application settings with validation"""
     
-    # Database
-    DATABASE_URL = os.getenv("DATABASE_URL")
+    # AWS Configuration
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     
-    # JWT
-    JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
-    JWT_ALGORITHM = "HS256"
+    # Environment
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
-    # Bedrock
-    BEDROCK_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"  # Haiku (fast + cheap)
+    # Database Configuration
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
+    
+    # JWT Configuration  
+    JWT_SECRET: str = os.getenv("JWT_SECRET")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_HOURS: int = 24
+    
+    # Worker Configuration
+    WORKER_ID: int = int(os.getenv("WORKER_ID", 1))
 
+    # Bedrock Configuration
+    BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    
+    # Validation
+    def __init__(self):
+        self._validate()
+    
+    def _validate(self):
+        """Validate required settings"""
+        required = [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY", 
+            "DATABASE_URL",
+            "JWT_SECRET"
+        ]
+        
+        missing = []
+        for var in required:
+            if not getattr(self, var):
+                missing.append(var)
+        
+        if missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        print("✅ Configuration validated successfully")
+
+# Create singleton instance
 settings = Settings()

@@ -1,17 +1,39 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import QueuePool
 from config.settings import settings
 
-# SQLAlchemy engine - database connection
+# Connection pool configuration
+POOL_SIZE = 5          # Number of connections to keep
+MAX_OVERFLOW = 10      # Additional connections when needed
+POOL_TIMEOUT = 30      # Seconds to wait for connection
+POOL_RECYCLE = 3600    # Recycle connections after 1 hour
+
+# Create engine with production settings
 engine = create_engine(
     settings.DATABASE_URL,
-    echo=True,  # SQL queries print honge (debugging ke liye)
-    pool_pre_ping=True,  # Connection check before use
-    pool_size=5,  # Connection pool size
-    max_overflow=10
+    
+    # Logging - only in development
+    echo=settings.ENVIRONMENT == "development",
+    
+    # Connection pool
+    poolclass=QueuePool,
+    pool_size=POOL_SIZE,
+    max_overflow=MAX_OVERFLOW,
+    pool_timeout=POOL_TIMEOUT,
+    pool_recycle=POOL_RECYCLE,
+    
+    # Connection health check
+    pool_pre_ping=True,  # Test connection before using
+    
+    # Performance
+    connect_args={
+        "connect_timeout": 10,  # Connection timeout
+        "options": "-c timezone=utc"  # Always use UTC
+    }
 )
 
-# Session factory - har request ke liye new session
+# Session factory
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -21,14 +43,17 @@ SessionLocal = sessionmaker(
 # Base class for models
 Base = declarative_base()
 
-# Dependency - FastAPI routes mein use hoga
+# Database dependency with proper error handling
 def get_db():
     """
-    Database session dependency
-    Har API call ke liye naya session banata hai
+    Dependency for database session
+    Properly handles connection cleanup
     """
     db = SessionLocal()
     try:
         yield db
+    except Exception as e:
+        db.rollback()
+        raise
     finally:
         db.close()

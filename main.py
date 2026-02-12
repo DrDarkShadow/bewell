@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.common import auth
+from api.common import auth, chat
+
+# API Version Prefix
+API_V1_PREFIX = "/api/v1"
 
 app = FastAPI(
     title="BeWell API",
     description="Mental Health Support Platform - AWS Hackathon",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=f"{API_V1_PREFIX}/docs",
+    redoc_url=f"{API_V1_PREFIX}/redoc"
 )
 
 # CORS - frontend se connect karne ke liye
@@ -18,10 +23,20 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(auth.router)
+app.include_router(auth.router, prefix=f"{API_V1_PREFIX}")
+app.include_router(chat.router, prefix=f"{API_V1_PREFIX}")
 
-# Health check
+# Health check (Root)
 @app.get("/")
+def root():
+    return {
+        "service": "BeWell API",
+        "version": "1.0.0",
+        "status": "healthy"
+    }
+
+# Health check (Versioned)
+@app.get(f"{API_V1_PREFIX}/health")
 def health_check():
     return {
         "status": "healthy",
