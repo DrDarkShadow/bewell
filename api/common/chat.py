@@ -13,7 +13,7 @@ from api.dependencies import require_patient
 from services.chat_service import ChatService
 from models.conversation import Conversation, Message
 
-router = APIRouter(prefix="/chat", tags=["Patient Chat"])
+router = APIRouter(prefix="/patient/chat", tags=["Patient Chat"])
 
 # ========== Request/Response Models ==========
 

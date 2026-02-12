@@ -27,7 +27,7 @@ class Settings:
     WORKER_ID: int = int(os.getenv("WORKER_ID", 1))
 
     # Bedrock Configuration
-    BEDROCK_MODEL_ID: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    BEDROCK_MODEL_ID: str = "amazon.nova-lite-v1:0"
     
     # Validation
     def __init__(self):
