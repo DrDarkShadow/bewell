@@ -61,7 +61,7 @@ class ConversationSummary(BaseModel):
 # ========== Endpoints ==========
 
 @router.post("/start", response_model=StartChatResponse)
-async def start_chat(
+def start_chat(
     current_user: dict = Depends(require_patient),
     db: Session = Depends(get_db)
 ):
@@ -77,7 +77,7 @@ async def start_chat(
 
 
 @router.post("/{conversation_id}/message", response_model=SendMessageResponse)
-async def send_message(
+def send_message(
     conversation_id: str,
     request: MessageRequest,
     current_user: dict = Depends(require_patient),
@@ -104,7 +104,7 @@ async def send_message(
 
 
 @router.get("/{conversation_id}/history", response_model=ChatHistoryResponse)
-async def get_history(
+def get_history(
     conversation_id: str,
     current_user: dict = Depends(require_patient),
     db: Session = Depends(get_db)
@@ -124,7 +124,7 @@ async def get_history(
 
 
 @router.get("/conversations", response_model=List[ConversationSummary])
-async def list_conversations(
+def list_conversations(
     current_user: dict = Depends(require_patient),
     db: Session = Depends(get_db)
 ):

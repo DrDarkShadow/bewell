@@ -13,16 +13,19 @@ def test_bedrock():
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
         )
         
-        # Simple test prompt
+        # Simple test prompt for Amazon Nova Lite
+        # Nova Lite expects: { "messages": [...], "inferenceConfig": {...} }
         body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 100,
             "messages": [
                 {
                     "role": "user",
-                    "content": "Say hello in one sentence"
+                    "content": [{"text": "Say hello in one sentence"}]
                 }
-            ]
+            ],
+            "inferenceConfig": {
+                "max_new_tokens": 100,
+                "temperature": 0.7
+            }
         })
         
         # Call Bedrock
@@ -32,8 +35,9 @@ def test_bedrock():
         )
         
         # Parse response
+        # Nova returns 'output.message.content[0].text'
         result = json.loads(response['body'].read())
-        ai_message = result['content'][0]['text']
+        ai_message = result['output']['message']['content'][0]['text']
         
         print("✅ Bedrock Working!")
         print(f"AI Response: {ai_message}")

@@ -84,6 +84,8 @@ CRISIS_KEYWORDS = [
     'no reason to live', 'ending it', 'give up on life',
     'not worth living', "don't want to live", 'dont want to live',
     'marna chahta', 'marna chahti', 'jaan de du', 'zindagi khatam',
+    "don't see any point in living", "dont see any point in living",
+    "any point in living", "not seeing any point in living",
 ]
 
 CRISIS_HELPLINES = {
