@@ -18,6 +18,10 @@ class Settings:
     # Database Configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL")
     
+    # Fix for SQLAlchemy (Postgresql dialect) if URL starts with postgres:// (common in Supabase/Heroku)
+    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    
     # JWT Configuration  
     JWT_SECRET: str = os.getenv("JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"

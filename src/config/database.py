@@ -1,7 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool, NullPool
 from config.settings import settings
+
+# Determine if we are using Supabase Transaction Pooler (port 6543)
+is_pooler = "pooler.supabase.com" in settings.DATABASE_URL or ":6543" in settings.DATABASE_URL
 
 # Connection pool configuration
 POOL_SIZE = 5          # Number of connections to keep
@@ -16,12 +19,16 @@ engine = create_engine(
     # Logging - only in development
     echo=settings.ENVIRONMENT == "development",
     
-    # Connection pool
-    poolclass=QueuePool,
-    pool_size=POOL_SIZE,
-    max_overflow=MAX_OVERFLOW,
-    pool_timeout=POOL_TIMEOUT,
-    pool_recycle=POOL_RECYCLE,
+    # Connection pool configuration
+    # If using Supabase Transaction Pooler, disable client-side pooling (NullPool)
+    # Otherwise, use standard QueuePool
+    poolclass=NullPool if is_pooler else QueuePool,
+    **({
+        "pool_size": POOL_SIZE,
+        "max_overflow": MAX_OVERFLOW,
+        "pool_timeout": POOL_TIMEOUT,
+        "pool_recycle": POOL_RECYCLE,
+    } if not is_pooler else {}),
     
     # Connection health check
     pool_pre_ping=True,  # Test connection before using

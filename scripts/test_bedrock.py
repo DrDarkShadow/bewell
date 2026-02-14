@@ -3,44 +3,55 @@ import json
 import sys
 import os
 
-# Add src to path so we can import config
-sys.path.append(os.path.join(os.getcwd(), "src"))
+# Add src to python path to allow importing config
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+
 from config.settings import settings
 
 def test_bedrock():
-    print(f"🕵️ Testing Bedrock connectivity in {settings.AWS_REGION}...")
-    print(f"🔑 Key: {settings.AWS_ACCESS_KEY_ID[:5]}... (length: {len(settings.AWS_ACCESS_KEY_ID)})")
-    
-    client = boto3.client(
-        service_name='bedrock-runtime',
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
-    )
-    
-    model_id = "amazon.nova-lite-v1:0"
-    
-    body = json.dumps({
-        "system": [{"text": "You are a helpful assistant."}],
-        "messages": [{"role": "user", "content": [{"text": "Hello, how are you?"}]}],
-        "inferenceConfig": {
-            "max_new_tokens": 100,
-            "temperature": 0.7
-        }
-    })
-    
+    """Test AWS Bedrock connection"""
     try:
-        print(f"🤖 Invoking model {model_id}...")
-        response = client.invoke_model(
-            modelId=model_id,
+        # Create Bedrock client
+        bedrock = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY
+        )
+        
+        # Simple test prompt for Amazon Nova Lite
+        # Nova Lite expects: { "messages": [...], "inferenceConfig": {...} }
+        body = json.dumps({
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": "Say hello in one sentence"}]
+                }
+            ],
+            "inferenceConfig": {
+                "max_new_tokens": 100,
+                "temperature": 0.7
+            }
+        })
+        
+        # Call Bedrock
+        response = bedrock.invoke_model(
+            modelId=settings.BEDROCK_MODEL_ID,
             body=body
         )
+        
+        # Parse response
+        # Nova returns 'output.message.content[0].text'
         result = json.loads(response['body'].read())
-        print("✅ Success! Response:")
-        print(json.dumps(result, indent=2))
+        ai_message = result['output']['message']['content'][0]['text']
+        
+        print("✅ Bedrock Working!")
+        print(f"AI Response: {ai_message}")
+        return True
         
     except Exception as e:
         print(f"❌ Bedrock Error: {e}")
+        return False
 
 if __name__ == "__main__":
     test_bedrock()
