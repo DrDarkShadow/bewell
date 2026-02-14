@@ -10,6 +10,7 @@ from typing import Dict, List
 
 from models.conversation import Conversation, Message
 from services.ai_service import ai_service
+from agents.emotion_detection import emotion_service
 from utils.snowflake import generate_id
 
 logger = logging.getLogger(__name__)
@@ -63,21 +64,34 @@ class ChatService:
 
         Flow:
         1. Verify ownership
-        2. Save user message
-        3. Build AI context (last 10 messages + summary)
-        4. Call AI
-        5. Save AI response
-        6. Update timestamp
+        2. ML emotion analysis on user message
+        3. Save user message with emotion data
+        4. Build AI context (last 10 messages + summary)
+        5. Call AI
+        6. Save AI response
         7. Auto-summarize every 10 messages
+        8. Return response + emotion + smart suggestion
         """
         conv = self._get_conversation(conversation_id, user_id)
 
-        # Save user message
+        # ML emotion analysis (RoBERTa + GoEmotions fusion)
+        try:
+            emotion_result = emotion_service.analyze(content, use_ml=True)
+            logger.info(
+                f"🧠 Emotion: {emotion_result.primary_emotion} | "
+                f"Stress: {emotion_result.stress_score:.0%} ({emotion_result.stress_level})"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Emotion analysis failed: {e}")
+            emotion_result = emotion_service.analyze(content, use_ml=False)
+
+        # Save user message with emotion score
         user_msg = Message(
             id=generate_id(),
             conversation_id=conversation_id,
             sender_type="patient",
             content=content,
+            emotion_score=emotion_result.to_dict(),
             timestamp=datetime.utcnow()
         )
         self.db.add(user_msg)
@@ -102,7 +116,7 @@ class ChatService:
             ai_response = ai_service.get_chat_response(
                 user_message=content,
                 conversation_history=history_for_ai,
-                conversation_summary=conv.summary  # ← extends context beyond 10 messages
+                conversation_summary=conv.summary
             )
             logger.info(f"✅ AI responded: '{ai_response['response'][:50]}...'")
 
@@ -113,13 +127,12 @@ class ChatService:
                 detail="Failed to get AI response"
             )
 
-        # Save AI response (emotion_score is JSON column, no json.dumps needed)
+        # Save AI response
         ai_msg = Message(
             id=generate_id(),
             conversation_id=conversation_id,
             sender_type="ai",
             content=ai_response["response"],
-            emotion_score=ai_response.get("emotion_detected", {}),
             timestamp=datetime.utcnow()
         )
         self.db.add(ai_msg)
@@ -140,7 +153,14 @@ class ChatService:
 
         return {
             "user_message": user_msg,
-            "ai_message": ai_msg
+            "ai_message": ai_msg,
+            "emotion": emotion_result.to_dict(),
+            "suggestion": emotion_result.suggestion.to_dict() if emotion_result.suggestion else None,
+            "metrics": {
+                "model": ai_response.get("model_used"),
+                "tokens": ai_response.get("tokens_used"),
+                "response_time_ms": ai_response.get("response_time_ms")
+            }
         }
 
     def _get_conversation(self, conversation_id: int, user_id: int) -> Conversation:

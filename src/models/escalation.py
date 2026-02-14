@@ -13,8 +13,8 @@ class Escalation(Base):
     id = Column(BigInteger, primary_key=True)
     
     # Relationships
-    patient_id = Column(String(50), ForeignKey('users.id'), nullable=False, index=True)
-    professional_id = Column(String(50), ForeignKey('users.id'), nullable=True)  # Assigned later
+    patient_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)
+    professional_id = Column(BigInteger, ForeignKey('users.id'), nullable=True)  # Assigned later
     conversation_id = Column(BigInteger, ForeignKey('conversations.id'), nullable=False)
     consent_id = Column(BigInteger, ForeignKey('consent_logs.id'), nullable=False)
     

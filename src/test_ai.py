@@ -17,13 +17,19 @@ def test_simple_message():
     print("TEST 1: Simple Message")
     print("="*60)
     
+    from agents.emotion_detection import emotion_service
+    
+    # Analyze emotion first (like ChatService does)
+    emotion_result = emotion_service.analyze(text="I'm feeling stressed about work")
+    
     response = ai_service.get_chat_response(
         user_message="I'm feeling stressed about work"
     )
     
     print(f"\n💬 User: I'm feeling stressed about work")
     print(f"🤖 AI: {response['response']}")
-    print(f"\n📊 Emotions: {json.dumps(response['emotion_detected'], indent=2)}")
+    print(f"\n📊 Emotions: {json.dumps(emotion_result.to_dict(), indent=2)}")
+
     print(f"⏱️  Response time: {response['response_time_ms']}ms")
     print(f"🎫 Tokens used: {response['tokens_used']}")
 
@@ -60,7 +66,12 @@ def test_crisis_detection():
     print("TEST 3: Crisis Detection")
     print("="*60)
     
+    from agents.emotion_detection import emotion_service
+    
     crisis_message = "I don't see any point in living anymore"
+    
+    # Analyze emotion
+    emotion_result = emotion_service.analyze(text=crisis_message)
     
     response = ai_service.get_chat_response(
         user_message=crisis_message
@@ -68,8 +79,8 @@ def test_crisis_detection():
     
     print(f"\n💬 User: {crisis_message}")
     print(f"🤖 AI: {response['response']}")
-    print(f"\n🚨 Crisis detected: {response['emotion_detected']['crisis_detected']}")
-    print(f"⚠️  Needs escalation: {response['emotion_detected']['needs_escalation']}")
+    print(f"\n🚨 Crisis detected: {emotion_result.crisis_detected}")
+    print(f"⚠️  Needs escalation: {emotion_result.needs_escalation}")
 
 def test_health_check():
     """Test 4: Service health"""

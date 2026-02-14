@@ -3,29 +3,29 @@ Authentication Utilities (Production Ready)
 Handles password hashing (bcrypt) and JWT operations.
 """
 from datetime import datetime, timedelta
+import bcrypt
 import jwt
-from fastapi import HTTPException, status
-from passlib.context import CryptContext
 from config.settings import settings
-
-# Password Hashing Setup
-# schemes=["bcrypt"]: Industry standard algorithm (slow & secure)
-# deprecated="auto": Automatically handle old hashes if we upgrade later
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")  # Removed due to version conflict
 
 def hash_password(password: str) -> str:
     """
-    Hash a plain password using bcrypt.
-    Why bcrypt? It limits brute-force attacks by being intentionally slow.
+    Hash a plain password using bcrypt (native library).
     """
-    return pwd_context.hash(password)
+    # Generate salt and hash
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Check if plain password matches the stored hash.
     Safe against timing attacks.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    pwd_bytes = plain_password.encode('utf-8')
+    hash_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(pwd_bytes, hash_bytes)
 
 def create_access_token(user_id: str, role: str) -> str:
     """

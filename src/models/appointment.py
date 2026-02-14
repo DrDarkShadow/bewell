@@ -12,8 +12,8 @@ class Appointment(Base):
     id = Column(BigInteger, primary_key=True)
     
     # Relationships
-    patient_id = Column(String(50), ForeignKey('users.id'), nullable=False, index=True)
-    professional_id = Column(String(50), ForeignKey('users.id'), nullable=False, index=True)
+    patient_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)
+    professional_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)
     escalation_id = Column(BigInteger, ForeignKey('escalations.id'), nullable=True)  # Optional link
     
     # Appointment Details

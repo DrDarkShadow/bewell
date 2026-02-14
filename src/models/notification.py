@@ -12,7 +12,7 @@ class Notification(Base):
     id = Column(BigInteger, primary_key=True)
     
     # Relationships
-    user_id = Column(String(50), ForeignKey('users.id'), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)
     
     # Notification Details
     notification_type = Column(String(50), nullable=False) # appointment/escalation/message

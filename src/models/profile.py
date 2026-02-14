@@ -10,7 +10,7 @@ class Profile(Base):
     __tablename__ = "profiles"
     
     id = Column(BigInteger, primary_key=True)
-    user_id = Column(String(50), ForeignKey('users.id'), unique=True, nullable=False)
+    user_id = Column(BigInteger, ForeignKey('users.id'), unique=True, nullable=False)
     
     # Patient Specific
     age = Column(Integer, nullable=True)

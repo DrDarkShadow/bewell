@@ -108,10 +108,8 @@ Crisis indicators:
         if not self.bedrock:
              # Fallback if client init failed
             fallback = self._get_fallback_response()
-            emotion_score = self._detect_emotion(user_message)
             return {
                 "response": fallback,
-                "emotion_detected": emotion_score,
                 "model_used": "fallback (client init failed)",
                 "tokens_used": 0,
                 "response_time_ms": 0,
@@ -162,16 +160,12 @@ Crisis indicators:
             
             logger.info(f"✅ AI responded in {response_time_ms}ms: '{ai_response[:50]}...'")
             
-            # Detect emotions
-            emotion_score = self._detect_emotion(user_message)
-            
             # Count tokens (approximation: 1 token ≈ 4 chars)
             tokens_used = len(ai_response) // 4
             
             return {
                 "response": ai_response,
-                "emotion_detected": emotion_score,
-                "model_used": "claude-3-haiku",
+                "model_used": self.model_id,
                 "tokens_used": tokens_used,
                 "response_time_ms": response_time_ms
             }
@@ -181,13 +175,11 @@ Crisis indicators:
             
             # Use fallback response
             fallback = self._get_fallback_response()
-            emotion_score = self._detect_emotion(user_message)
             
             logger.warning(f"⚠️ Using fallback response: '{fallback}'")
             
             return {
                 "response": fallback,
-                "emotion_detected": emotion_score,
                 "model_used": "fallback",
                 "tokens_used": 0,
                 "response_time_ms": 0,
@@ -280,80 +272,7 @@ Crisis indicators:
             logger.error(f"❌ Failed to generate summary: {e}")
             return ""
     
-    def _detect_emotion(self, message: str) -> Dict:
-        """
-        Detect emotions using keyword-based analysis
-        
-        NOTE: This is a simple baseline implementation
-        Production should use:
-        - Fine-tuned BERT model
-        - Hugging Face transformers
-        - AWS Comprehend
-        
-        Args:
-            message: User message text
-        
-        Returns:
-            {
-                "stress": float (0-1),
-                "anxiety": float (0-1),
-                "sadness": float (0-1),
-                "anger": float (0-1),
-                "crisis_detected": bool,
-                "needs_escalation": bool
-            }
-        """
-        message_lower = message.lower()
-        
-        # Keyword dictionaries
-        stress_keywords = [
-            'stress', 'stressed', 'overwhelm', 'overwhelmed', 'pressure',
-            'anxious', 'anxiety', 'worried', 'nervous', 'tense', 'burden'
-        ]
-        
-        sadness_keywords = [
-            'sad', 'depressed', 'down', 'hopeless', 'lonely', 'cry',
-            'crying', 'upset', 'hurt', 'miserable', 'empty'
-        ]
-        
-        anger_keywords = [
-            'angry', 'frustrated', 'annoyed', 'irritated', 'mad',
-            'furious', 'rage', 'hate', 'resent'
-        ]
-        
-        # CRITICAL: Crisis detection keywords
-        crisis_keywords = [
-            'suicide', 'suicidal', 'kill myself', 'end it all',
-            'no point in living', 'hurt myself', 'self harm', 'want to die', 'better off dead',
-            'no reason to live', 'ending it', 'give up on life',
-            'not worth living', 'don\'t want to live', 'don\'t see any point', 'dont see any point'
-        ]
-        
-        # Count keyword matches
-        stress_count = sum(1 for word in stress_keywords if word in message_lower)
-        sadness_count = sum(1 for word in sadness_keywords if word in message_lower)
-        anger_count = sum(1 for word in anger_keywords if word in message_lower)
-        crisis_count = sum(1 for word in crisis_keywords if word in message_lower)
-        
-        # Calculate scores (0-1 range)
-        # Each keyword adds 0.35, capped at 1.0
-        scores = {
-            "stress": min(stress_count * 0.35, 1.0),
-            "anxiety": min(stress_count * 0.3, 1.0),  # Related to stress
-            "sadness": min(sadness_count * 0.35, 1.0),
-            "anger": min(anger_count * 0.35, 1.0),
-            "crisis_detected": crisis_count > 0,
-            "needs_escalation": (
-                stress_count > 2 or
-                sadness_count > 2 or
-                crisis_count > 0
-            )
-        }
-        
-        if scores["crisis_detected"]:
-            logger.warning(f"🚨 CRISIS DETECTED in message: '{message[:100]}...'")
-        
-        return scores
+
     
     def _get_fallback_response(self) -> str:
         """

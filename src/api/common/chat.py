@@ -40,6 +40,9 @@ class SendMessageResponse(BaseModel):
     conversation_id: str
     user_message: MessageResponse
     ai_message: MessageResponse
+    emotion: Optional[dict] = None
+    suggestion: Optional[dict] = None
+    metrics: Optional[dict] = None
 
 class ChatHistoryResponse(BaseModel):
     conversation_id: str
@@ -93,7 +96,10 @@ async def send_message(
     return {
         "conversation_id": conversation_id,
         "user_message": result["user_message"].to_dict(),
-        "ai_message": result["ai_message"].to_dict()
+        "ai_message": result["ai_message"].to_dict(),
+        "emotion": result.get("emotion"),
+        "suggestion": result.get("suggestion"),
+        "metrics": result.get("metrics")
     }
 
 

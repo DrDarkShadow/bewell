@@ -8,8 +8,8 @@ class ConsentLog(Base):
     
     id = Column(BigInteger, primary_key=True)
     
-    # ID type change: BigInteger -> String (UUID match)
-    user_id = Column(String(50), ForeignKey('users.id'), nullable=False, index=True)
+    # ID type change: BigInteger to match User ID
+    user_id = Column(BigInteger, ForeignKey('users.id'), nullable=False, index=True)
     
     consent_type = Column(String(100), nullable=False)  # 'escalation', 'data_sharing'
     granted = Column(Boolean, default=False)
