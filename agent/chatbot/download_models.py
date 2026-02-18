@@ -1,7 +1,3 @@
-"""
-Script to download and cache the pre-trained models.
-Run this once before starting the app.
-"""
 
 print("📦 Downloading and caching pre-trained models...")
 print("This may take a few minutes on first run.\n")

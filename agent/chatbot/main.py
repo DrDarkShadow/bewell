@@ -1,4 +1,4 @@
-from agent import agent
+from agent.agent import agent
 
 print("Hey 😊 How are you feeling today?")
 print("Type 'bye' to exit.\n")
