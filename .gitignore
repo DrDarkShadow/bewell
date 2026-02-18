@@ -1,7 +1,20 @@
-venv/
+# Python cache
 __pycache__/
 *.pyc
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
 .env
+
+# Node.js dependencies
+node_modules/
+frontend/node_modules/
+
+# Other
 .DS_Store
 *.db
 .agent/
