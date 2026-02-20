@@ -1,15 +1,23 @@
 import os
-from dotenv import load_dotenv
+import sys
+
+# Ensure backend/src is in the path to import config
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+backend_src = os.path.join(project_root, "backend", "src")
+if backend_src not in sys.path:
+    sys.path.append(backend_src)
+
+from config.settings import settings
 from langchain_aws import ChatBedrock
 
-load_dotenv()
-
-# Initialize AWS Bedrock (Amazon Nova Lite)
+# Initialize AWS Bedrock using backend settings
 llm = ChatBedrock(
-    model_id="amazon.nova-lite-v1:0",
+    model_id=settings.BEDROCK_MODEL_ID,
     model_kwargs={
         "temperature": 0.7,
         "max_tokens": 1000,
     },
-    region_name=os.getenv("AWS_REGION", "us-east-1")
+    client=None, # Langchain AWS client will use environment vars or default session, which settings also load
+    region_name=settings.AWS_REGION
 )

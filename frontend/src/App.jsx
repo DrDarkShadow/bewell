@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 import BreathingExercise from './components/BreathingExercise';
 import Games from './components/Games';
-import { useEffect } from 'react';
 
 const defaultMessages = [
   { role: 'assistant', content: "Hey there! 😊 I'm your friendly companion. How are you feeling today?" },
 ];
+
+const BACKEND_URL = 'http://localhost:8000/api/v1';
 
 function App() {
   const [messages, setMessages] = useState(defaultMessages);
@@ -19,38 +20,108 @@ function App() {
   const [chatHistory, setChatHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Simulate new chat session
-  const handleNewChat = () => {
+  const [token, setToken] = useState(null);
+  const [conversationId, setConversationId] = useState(null);
+  
+  // Transparent Login on load
+  useEffect(() => {
+    const defaultLogin = async () => {
+      try {
+        // Try login first
+        const loginData = { email: "dev_user@example.com", password: "Password123" };
+        let res = await fetch(`${BACKEND_URL}/auth/local/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(loginData)
+        });
+        
+        if (!res.ok) {
+          // If login fails (user doesn't exist), try to signup
+          const signupData = { ...loginData, name: "Dev User", role: "patient" };
+          res = await fetch(`${BACKEND_URL}/auth/local/signup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(signupData)
+          });
+        }
+        
+        if (res.ok) {
+          const data = await res.json();
+          setToken(data.token);
+        } else {
+          console.error("Failed to authenticate with backend:", await res.text());
+        }
+      } catch (e) {
+        console.error("Backend connection error:", e);
+      }
+    };
+    
+    defaultLogin();
+  }, []);
+
+  // Start a new chat session when token is ready or when requested
+  useEffect(() => {
+    if (token && !conversationId) {
+      handleNewChat();
+    }
+  }, [token]);
+
+  const handleNewChat = async () => {
+    if (!token) return;
+    
     setMessages(defaultMessages);
     setActivity(null);
+    setStress(null);
+    
+    try {
+      const res = await fetch(`${BACKEND_URL}/patient/chat/start`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setConversationId(data.conversation_id);
+      }
+    } catch (e) {
+      console.error("Failed to start chat session", e);
+    }
   };
 
   // Send message to backend
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !conversationId || !token) return;
+    
     const newMessages = [...messages, { role: 'user', content: input }];
     setMessages(newMessages);
     setInput('');
     setLoading(true);
+    
     try {
-      const res = await fetch('http://localhost:8001/chat', {
+      const res = await fetch(`${BACKEND_URL}/patient/chat/${conversationId}/message`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content: input }),
       });
+      
       const data = await res.json();
-      setMessages(data.messages);
-      // Fetch stress score for latest user message
-      const stressRes = await fetch('http://localhost:8001/stress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
-      });
-      const stressData = await stressRes.json();
-      setStress(stressData);
+      
+      if (res.ok) {
+         // Update messages
+         // We only append the AI's response because we already optimistically added the user's message
+         setMessages([...newMessages, { role: 'assistant', content: data.ai_message.content }]);
+         
+         // Update stress state from the emotion data embedded in the response
+         if (data.emotion && !data.emotion.error) {
+             setStress(data.emotion);
+         }
+      } else {
+         setMessages(msgs => [...msgs, { role: 'assistant', content: 'Error: Something went wrong on the server.' }]);
+      }
     } catch (e) {
       setMessages(msgs => [...msgs, { role: 'assistant', content: 'Error: Could not connect to backend.' }]);
-      setStress(null);
     }
     setLoading(false);
   };
@@ -58,39 +129,53 @@ function App() {
   // Simulate activity selection
   const handleSelectActivity = (act) => {
     setActivity(act);
-  };
-
-  // Simulate chat history
-  const handleShowHistory = () => {
-    setActivity('history');
-    fetchChatHistory();
-  };
-
-  // Simulate claiming affirmation
-
-  // Save chat session after each conversation
-  useEffect(() => {
-    if (messages.length > 1 && !activity && !loading) {
-      const session = {
-        id: Date.now().toString(),
-        messages,
-        timestamp: new Date().toISOString(),
-      };
-      fetch('http://localhost:8001/api/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(session),
-      });
+    if (act === 'history') {
+      fetchChatHistory();
     }
-  }, [messages, activity, loading]);
+  };
+
+  const handleShowHistory = () => {
+    handleSelectActivity('history');
+  };
 
   // Fetch chat history from backend
   const fetchChatHistory = async () => {
+    if (!token) return;
+    
     setHistoryLoading(true);
     try {
-      const res = await fetch('http://localhost:8001/api/history');
-      const data = await res.json();
-      setChatHistory(data);
+      // Fetch list of conversations
+      const res = await fetch(`${BACKEND_URL}/patient/chat/conversations`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        const histories = [];
+        
+        // Fetch actual messages for the most recent 5 conversations
+        for (const conv of data.slice(0, 5)) {
+            const msgRes = await fetch(`${BACKEND_URL}/patient/chat/${conv.id}/history`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (msgRes.ok) {
+                const msgData = await msgRes.json();
+                
+                // Map backend message format to frontend format
+                const mappedMessages = msgData.messages.map(m => ({
+                    role: m.sender === 'patient' ? 'user' : 'assistant',
+                    content: m.content
+                }));
+                
+                histories.push({
+                    id: conv.id,
+                    timestamp: new Date(conv.started_at).toLocaleString(),
+                    messages: mappedMessages
+                });
+            }
+        }
+        setChatHistory(histories);
+      }
     } catch (e) {
       setChatHistory([]);
     }
@@ -110,7 +195,9 @@ function App() {
           <p style={{ color: '#856404', opacity: 0.8, fontSize: '1rem' }}>
             Your friendly chat companion - here to listen, play, and relax with you!
           </p>
+          {!token && <p style={{ color: 'red', fontSize: '0.8rem' }}>Connecting to Backend...</p>}
         </div>
+        
         {/* Main content area based on activity */}
         {activity === 'breathing' && (
           <BreathingExercise cycles={3} />
@@ -133,8 +220,8 @@ function App() {
                   Stress Score: {(stress.stress_score * 100).toFixed(0)}%
                 </div>
                 <div>Level: <b>{stress.stress_level.toUpperCase()}</b></div>
-                <div>Sentiment: {stress.sentiment}</div>
-                <div>Primary Emotion: {stress.emotion}</div>
+                <div>Sentiment: {stress.sentiment?.label || stress.sentiment}</div>
+                <div>Primary Emotion: {stress.emotions?.primary_emotion || stress.emotion}</div>
                 <div style={{ marginTop: 12, fontStyle: 'italic' }}>{stress.recommendation}</div>
               </div>
             ) : (
@@ -177,7 +264,7 @@ function App() {
               ))}
               {loading && <ChatMessage message="Thinking..." isUser={false} />}
             </div>
-            <ChatInput value={input} onChange={setInput} onSend={handleSend} />
+            <ChatInput value={input} onChange={setInput} onSend={handleSend} disabled={!token || !conversationId || loading} />
           </>
         )}
       </main>

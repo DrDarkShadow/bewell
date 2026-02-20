@@ -67,6 +67,14 @@ class ChatService:
         # 2. Advanced Stress & Emotion Analysis (Model Fusion)
         try:
             # Import locally to avoid circular dependency
+            import sys
+            import os
+            # Ensure project root is in path so we can import 'agent'
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            if project_root not in sys.path:
+                sys.path.append(project_root)
+                
             from agent.chatbot.model_fusion import calculate_stress_score
             stress_result = calculate_stress_score(content)
             
@@ -112,14 +120,18 @@ class ChatService:
 
         # 5. Invoke Chatbot Agent (AWS Bedrock)
         try:
+            import sys
+            import os
+            # Ensure project root is in path so we can import 'agent'
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            if project_root not in sys.path:
+                sys.path.append(project_root)
+                
             from agent.chatbot.agent import agent
             
-            # Run agent asynchronously in threadpool since it might be sync
-            import asyncio
-            loop = asyncio.get_event_loop()
-            
-            # Invoke agent
-            result = await loop.run_in_executor(None, lambda: agent.invoke({"messages": chat_history}))
+            # Invoke agent synchronously
+            result = agent.invoke({"messages": chat_history})
             
             # Extract response
             ai_content = result["messages"][-1].content
