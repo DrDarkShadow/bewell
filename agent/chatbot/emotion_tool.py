@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from text_processing import process_user_text, get_text_emotional_context, TextFeatures
+from .text_processing import process_user_text, get_text_emotional_context, TextFeatures
 
 # Lazy import for model fusion (heavy models)
 _model_fusion_loaded = False
@@ -10,7 +10,7 @@ def _get_stress_calculator():
     """Lazy load the stress calculator to avoid slow startup"""
     global _model_fusion_loaded, _stress_calculator
     if not _model_fusion_loaded:
-        from model_fusion import get_stress_calculator
+        from .model_fusion import get_stress_calculator
         _stress_calculator = get_stress_calculator()
         _model_fusion_loaded = True
     return _stress_calculator

@@ -9,9 +9,8 @@ from datetime import datetime
 from typing import Dict, List
 
 from models.conversation import Conversation, Message
-from services.ai_service import ai_service
-from agents.emotion_detection import emotion_service
 from utils.snowflake import generate_id
+# Note: Agent imports are done locally to avoid circular dependencies
 
 logger = logging.getLogger(__name__)
 
@@ -60,107 +59,100 @@ class ChatService:
 
     def send_message(self, conversation_id: int, user_id: int, content: str) -> Dict:
         """
-        Send message and get AI response
-
-        Flow:
-        1. Verify ownership
-        2. ML emotion analysis on user message
-        3. Save user message with emotion data
-        4. Build AI context (last 10 messages + summary)
-        5. Call AI
-        6. Save AI response
-        7. Auto-summarize every 10 messages
-        8. Return response + emotion + smart suggestion
+        Send message and get AI response using AWS Bedrock Agent
         """
+        # 1. Verify ownership
         conv = self._get_conversation(conversation_id, user_id)
 
-        # ML emotion analysis (RoBERTa + GoEmotions fusion)
+        # 2. Advanced Stress & Emotion Analysis (Model Fusion)
         try:
-            emotion_result = emotion_service.analyze(content, use_ml=True)
+            # Import locally to avoid circular dependency
+            from agent.chatbot.model_fusion import calculate_stress_score
+            stress_result = calculate_stress_score(content)
+            
             logger.info(
-                f"🧠 Emotion: {emotion_result.primary_emotion} | "
-                f"Stress: {emotion_result.stress_score:.0%} ({emotion_result.stress_level})"
+                f"🧠 Model Fusion: Stress {stress_result.stress_score:.0%} | "
+                f"Emotion: {stress_result.emotions.primary_emotion}"
             )
+            
+            # Convert to dict for JSON storage
+            emotion_data = stress_result.to_dict()
+            
         except Exception as e:
-            logger.warning(f"⚠️ Emotion analysis failed: {e}")
-            emotion_result = emotion_service.analyze(content, use_ml=False)
+            logger.warning(f"⚠️ Stress analysis failed: {e}")
+            emotion_data = {"error": str(e)}
 
-        # Save user message with emotion score
+        # 3. Save User Message (with rich emotion data)
         user_msg = Message(
             id=generate_id(),
             conversation_id=conversation_id,
             sender_type="patient",
             content=content,
-            emotion_score=emotion_result.to_dict(),
+            emotion_score=emotion_data, # ✅ Rich JSON data
             timestamp=datetime.utcnow()
         )
         self.db.add(user_msg)
+        
+        logger.info(f"💬 User {user_id} sent message: '{content[:30]}...'")
 
-        logger.info(f"💬 User {user_id} sent message in conversation {conversation_id}")
-
-        # Build AI context (last 10 messages, chronological)
+        # 4. Build Context for Agent
+        # Get last 15 messages for context
         previous_messages = self.db.query(Message).filter(
             Message.conversation_id == conversation_id
-        ).order_by(Message.timestamp.desc()).limit(10).all()[::-1]
+        ).order_by(Message.timestamp.desc()).limit(15).all()[::-1]
 
-        history_for_ai = [
-            {
-                "role": "user" if m.sender_type == "patient" else "assistant",
-                "content": m.content
-            }
-            for m in previous_messages
-        ]
+        # Convert to LangGraph format
+        chat_history = []
+        for m in previous_messages:
+            role = "user" if m.sender_type == "patient" else "assistant"
+            chat_history.append({"role": role, "content": m.content})
+            
+        # Add current message
+        chat_history.append({"role": "user", "content": content})
 
-        # Call AI with context + conversation summary
+        # 5. Invoke Chatbot Agent (AWS Bedrock)
         try:
-            ai_response = ai_service.get_chat_response(
-                user_message=content,
-                conversation_history=history_for_ai,
-                conversation_summary=conv.summary
-            )
-            logger.info(f"✅ AI responded: '{ai_response['response'][:50]}...'")
+            from agent.chatbot.agent import agent
+            
+            # Run agent asynchronously in threadpool since it might be sync
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            # Invoke agent
+            result = await loop.run_in_executor(None, lambda: agent.invoke({"messages": chat_history}))
+            
+            # Extract response
+            ai_content = result["messages"][-1].content
+            if isinstance(ai_content, list):
+                # Handle block content from Bedrock
+                ai_text = "".join(block["text"] for block in ai_content if "text" in block)
+            else:
+                ai_text = str(ai_content)
+                
+            logger.info(f"✅ Agent responded: '{ai_text[:50]}...'")
 
         except Exception as e:
-            logger.error(f"❌ AI service failed: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to get AI response"
-            )
+            logger.error(f"❌ Agent invocation failed: {e}")
+            ai_text = "I'm having trouble connecting right now. Please try again in a moment. 😔"
 
-        # Save AI response
+        # 6. Save AI Response
         ai_msg = Message(
             id=generate_id(),
             conversation_id=conversation_id,
             sender_type="ai",
-            content=ai_response["response"],
+            content=ai_text,
             timestamp=datetime.utcnow()
         )
         self.db.add(ai_msg)
 
-        # Update conversation timestamp
+        # 7. Update conversation timestamp
         conv.last_message_at = datetime.utcnow()
-
-        # Auto-summarize every 10 messages
-        total_msg_count = self.db.query(Message).filter(
-            Message.conversation_id == conversation_id
-        ).count()
-
-        if total_msg_count > 0 and total_msg_count % 10 == 0:
-            logger.info(f"📝 Auto-summarizing (message count: {total_msg_count})")
-            self._update_summary(conv, conversation_id)
-
         self.db.commit()
 
         return {
             "user_message": user_msg,
             "ai_message": ai_msg,
-            "emotion": emotion_result.to_dict(),
-            "suggestion": emotion_result.suggestion.to_dict() if emotion_result.suggestion else None,
-            "metrics": {
-                "model": ai_response.get("model_used"),
-                "tokens": ai_response.get("tokens_used"),
-                "response_time_ms": ai_response.get("response_time_ms")
-            }
+            "emotion": emotion_data
         }
 
     def _get_conversation(self, conversation_id: int, user_id: int) -> Conversation:

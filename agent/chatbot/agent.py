@@ -1,15 +1,15 @@
 from langgraph.prebuilt import create_react_agent
-from llm import llm
-from emotion_tool import (
+from .llm import llm
+from .emotion_tool import (
     detect_emotion, 
     get_emotional_history, 
     analyze_text_features,
     analyze_stress_deep,
     get_stress_score
 )
-from breathing_tool import start_breathing_exercise
-from games_tool import start_game
-from prompt import system_prompt
+from .breathing_tool import start_breathing_exercise
+from .games_tool import start_game
+from .prompt import system_prompt
 
 tools = [
     detect_emotion, 

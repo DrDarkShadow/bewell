@@ -4,9 +4,21 @@ from pydantic import BaseModel
 from typing import List
 import sys
 import os
-sys.path.append(os.path.dirname(__file__))
-from model_fusion import calculate_stress_score
-from agent.agent import agent
+
+# Add project root to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
+# Now we can import from agent
+try:
+    from agent.chatbot.agent import agent
+except ImportError:
+    # Fallback if running from root
+    from agent.chatbot.agent import agent
+
+from agent.chatbot.model_fusion import calculate_stress_score
+
 import asyncio
 from backend.history_api import router as history_router
 from backend.games_api import games_router
