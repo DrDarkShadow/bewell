@@ -6,41 +6,18 @@ const ChatInput = ({ value, onChange, onSend }) => (
       e.preventDefault();
       onSend();
     }}
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      marginTop: 24,
-      gap: 8,
-      justifyContent: 'center',
-    }}
+    className="chat-input"
   >
     <input
       type="text"
       value={value}
       onChange={e => onChange(e.target.value)}
       placeholder="Type your message here... 💬"
-      style={{
-        borderRadius: 25,
-        border: '2px solid #ffc107',
-        background: 'white',
-        padding: '12px 20px',
-        fontSize: '1rem',
-        width: 350,
-        outline: 'none',
-      }}
+      className="chat-input-field"
     />
     <button
       type="submit"
-      style={{
-        borderRadius: 25,
-        background: '#ffc107',
-        color: '#856404',
-        border: 'none',
-        padding: '12px 24px',
-        fontWeight: 600,
-        fontSize: '1rem',
-        cursor: 'pointer',
-      }}
+      className="chat-input-button"
     >
       Send
     </button>

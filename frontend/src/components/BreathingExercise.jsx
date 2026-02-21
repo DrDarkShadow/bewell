@@ -1,9 +1,36 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 
 const BreathingExercise = ({ cycles = 3 }) => {
   const circleRef = useRef();
   const [started, setStarted] = React.useState(false);
   const [finished, setFinished] = React.useState(false);
+
+  // Approximate duration calculation: (4s inhale + 2s hold + 4s exhale) = 10s per cycle
+  const estimatedDurationSecs = cycles * 10;
+
+  const saveActivity = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      // In production, backend URL should come from Vite env vars
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+      await fetch(`${apiBase}/patient/activities`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          activity_type: 'breathing',
+          duration_secs: estimatedDurationSecs
+        })
+      });
+    } catch (e) {
+      console.error('Failed to log breathing activity:', e);
+    }
+  };
 
   React.useEffect(() => {
     if (!started) return;
@@ -13,6 +40,7 @@ const BreathingExercise = ({ cycles = 3 }) => {
     const animate = () => {
       if (cycle >= cycles) {
         setFinished(true);
+        saveActivity(); // Automatically log upon completion
         return;
       }
       if (phase === 'inhale') {
@@ -43,47 +71,24 @@ const BreathingExercise = ({ cycles = 3 }) => {
   }, [cycles, started]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 32 }}>
+    <div className="breathing">
       <div
         ref={circleRef}
-        style={{
-          width: 180,
-          height: 180,
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, #ffe0ec 0%, #fffbe7 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '2rem',
-          color: '#d63384',
-          fontWeight: 600,
-          transition: 'transform 4s cubic-bezier(0.4,0,0.2,1)',
-          marginBottom: 24,
-        }}
+        className="breathing-circle"
       >
         {!started ? 'Ready?' : 'Inhale...'}
       </div>
       {!started ? (
         <button
-          style={{
-            background: '#ffc107',
-            color: '#856404',
-            border: 'none',
-            borderRadius: 12,
-            padding: '10px 24px',
-            fontWeight: 600,
-            fontSize: '1.1rem',
-            cursor: 'pointer',
-            marginBottom: 16,
-          }}
+          className="breathing-button"
           onClick={() => { setStarted(true); setFinished(false); }}
         >
           Start
         </button>
       ) : finished ? (
-        <div style={{ color: '#388e3c', fontWeight: 600, marginTop: 12 }}>Well done! 🎉</div>
+        <div className="breathing-finish">Well done! 🎉</div>
       ) : null}
-      <p style={{ color: '#856404', fontSize: '1.1rem' }}>Follow the circle for {cycles} cycles</p>
+      <p className="breathing-hint">Follow the circle for {cycles} cycles</p>
     </div>
   );
 };

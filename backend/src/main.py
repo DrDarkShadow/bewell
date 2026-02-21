@@ -10,7 +10,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO/WARNING
 # Add src to path so relative imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from api.common import auth, chat
+from api.common import auth, chat, appointments, listening, activities
 
 # API Version Prefix
 API_V1_PREFIX = "/api/v1"
@@ -28,34 +28,31 @@ app = FastAPI(
 async def startup_event():
     import os
     import subprocess
-    from transformers import file_utils
     from config.database import engine, Base
     import models  # Import all models so Base knows about them
     
-    print("🚀 Starting BeWell API...")
+    print("Starting BeWell API...")
 
     # Create Tables
-    print("🗄️ Checking database schema...")
+    print("Checking database schema...")
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables verified!")
-    
     # Check if models are cached (simple check)
-    cache_dir = file_utils.default_cache_path
-    print(f"📂 Checking model cache at: {cache_dir}")
+    cache_dir = os.environ.get("TRANSFORMERS_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"))
+    print(f"Checking model cache at: {cache_dir}")
     
     # We can also just run the download script - it skips if cached
     script_path = os.path.join(os.getcwd(), "scripts", "download_models.py")
     if os.path.exists(script_path):
-        print("🧠 Verifying ML models...")
+        print("Verifying ML models...")
         try:
             # Run download script
             subprocess.run(["python", script_path], check=True)
-            print("✅ Models verification complete!")
+            print("Models verification complete!")
         except Exception as e:
-            print(f"⚠️ Model verification failed: {e}")
-            print("🚀 Server starting anyway (ML features might degrade)")
+            print(f"Model verification failed: {e}")
+            print("Server starting anyway (ML features might degrade)")
     else:
-        print(f"⚠️ verification script not found at {script_path}")
+        print(f"verification script not found at {script_path}")
 
 # CORS - frontend se connect karne ke liye
 app.add_middleware(
@@ -69,6 +66,9 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix=f"{API_V1_PREFIX}")
 app.include_router(chat.router, prefix=f"{API_V1_PREFIX}")
+app.include_router(appointments.router, prefix=f"{API_V1_PREFIX}")
+app.include_router(listening.router, prefix=f"{API_V1_PREFIX}")
+app.include_router(activities.router, prefix=f"{API_V1_PREFIX}")
 
 # Health check (Root)
 @app.get("/")

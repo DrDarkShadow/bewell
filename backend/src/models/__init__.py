@@ -5,3 +5,4 @@ from .consent import ConsentLog
 from .escalation import Escalation
 from .notification import Notification
 from .profile import Profile
+from .activity import WellnessActivity

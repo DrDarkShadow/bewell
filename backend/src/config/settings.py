@@ -54,7 +54,7 @@ class Settings:
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
         
-        print("✅ Configuration validated successfully")
+        print("Configuration validated successfully")
 
 # Create singleton instance
 settings = Settings()

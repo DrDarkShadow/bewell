@@ -18,12 +18,11 @@ const Games = () => {
     const fetchGames = async () => {
       setLoading(true);
       try {
-        const res = await fetch('http://localhost:8000/api/games');
+        const res = await fetch('/games.json');
         const data = await res.json();
-        console.log('Fetched games:', data); // DEBUG LOG
         setGames(data);
       } catch (e) {
-        console.error('Error fetching games:', e); // DEBUG LOG
+        console.error('Error loading games:', e);
         setGames([]);
       }
       setLoading(false);
@@ -37,23 +36,52 @@ const Games = () => {
     setEmojiShowAnswer(false);
   }, [openGameIdx, qIdx]);
 
+  const saveGameActivity = async (activityType, score = null, metadata = null) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+      await fetch(`${apiBase}/patient/activities`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          activity_type: activityType,
+          score: score,
+          metadata_json: metadata
+        })
+      });
+    } catch (e) {
+      console.error(`Failed to log ${activityType} activity:`, e);
+    }
+  };
+
   if (loading) {
-    return <div style={{ textAlign: 'center', marginTop: 40 }}>Loading games...</div>;
+    return <div className="games-status">Loading games...</div>;
   }
-  if (!games.length) {
-    return <div style={{ textAlign: 'center', marginTop: 40 }}>No games available.</div>;
+  if (!games || !games.length) {
+    return <div className="games-status">No games available.</div>;
   }
 
   if (openGameIdx === null) {
     // Show all games as smaller cards
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 24, marginTop: 40 }}>
-        {games.map((g, idx) => (
-          <div key={g.type} style={cardStyleSmall} onClick={() => { setOpenGameIdx(idx); setQIdx(0); setShowAnswer(false); }}>
-            <img src={g.image} alt={g.title} style={{ width: 64, height: 64, marginBottom: 10 }} />
-            <h3 style={{ margin: 0, color: '#856404', fontSize: '1.1rem' }}>{g.title}</h3>
-          </div>
-        ))}
+      <div className="games-container">
+        <div className="games-grid">
+          {games.map((g, idx) => (
+            <button
+              key={g.type}
+              className="game-card"
+              onClick={() => { setOpenGameIdx(idx); setQIdx(0); setShowAnswer(false); }}
+              type="button"
+            >
+              <h3>{g.title}</h3>
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -71,183 +99,152 @@ const Games = () => {
 
   // Defensive: If game/questions are missing, show fallback
   if (!game || !game.questions || !game.questions.length) {
-    return <div style={{ textAlign: 'center', marginTop: 40 }}>No questions available for this game.</div>;
+    return <div className="games-status">No questions available for this game.</div>;
   }
 
   return (
-    <div style={{ textAlign: 'center', marginTop: 40 }}>
-      <button onClick={() => setOpenGameIdx(null)} style={{ ...btnStyle, marginBottom: 24 }}>← Back to Games</button>
-      <div style={{ ...cardStyleRect, maxWidth: 600, margin: '0 auto 24px', cursor: 'default' }}>
-        <img src={game.image} alt={game.title} style={{ width: 64, height: 64, marginBottom: 10 }} />
-        <h2 style={{ color: '#856404', fontSize: '1.3rem' }}>{game.title}</h2>
-        <div style={{ fontSize: '1.1rem', color: '#333', margin: '18px 0' }}>{question.q}</div>
+    <div className="games-detail">
+      <button onClick={() => setOpenGameIdx(null)} className="ghost" title="Back to Games">← </button>
+      <div className="game-panel">
+        <h2>{game.title}</h2>
+        <div className="game-question">{question.q}</div>
         {/* Gratitude input */}
         {isGratitudeInput && (
-          <div style={{ margin: '12px 0' }}>
-            <input
-              type="text"
-              value={gratitudeInput}
-              onChange={e => setGratitudeInput(e.target.value)}
-              placeholder="Write your gratitude..."
-              style={{ padding: '8px', borderRadius: 8, border: '1px solid #ffc107', width: '80%' }}
-            />
-            <button
-              style={{ ...btnStyle, marginLeft: 8, padding: '8px 14px', fontSize: '0.95rem' }}
-              onClick={() => {
-                if (gratitudeInput.trim()) {
-                  setGratitudeList([...gratitudeList, gratitudeInput]);
-                  setGratitudeInput("");
-                }
-              }}
-            >Submit</button>
-            <div style={{ marginTop: 10, textAlign: 'left' }}>
+          <div className="game-input-block">
+            <div className="game-input-row">
+              <input
+                type="text"
+                value={gratitudeInput}
+                onChange={e => setGratitudeInput(e.target.value)}
+                placeholder="Write your gratitude..."
+              />
+              <button
+                className="game-button"
+                onClick={() => {
+                  if (gratitudeInput.trim()) {
+                    setGratitudeList([...gratitudeList, gratitudeInput]);
+                    saveGameActivity('gratitude', null, { entry: gratitudeInput });
+                    setGratitudeInput("");
+                  }
+                }}
+                type="button"
+              >
+                Submit
+              </button>
+            </div>
+            <div className="game-list">
               {gratitudeList.map((g, i) => (
-                <div key={i} style={{ color: '#388e3c', fontWeight: 500, marginBottom: 4 }}>🌸 {g}</div>
+                <div key={i} className="game-list-item positive">{g}</div>
               ))}
             </div>
           </div>
         )}
         {/* Word chain input */}
         {isWordChainInput && (
-          <div style={{ margin: '12px 0' }}>
-            <input
-              type="text"
-              value={wordChainInput}
-              onChange={e => setWordChainInput(e.target.value)}
-              placeholder="Continue the chain..."
-              style={{ padding: '8px', borderRadius: 8, border: '1px solid #ffc107', width: '80%' }}
-            />
-            <button
-              style={{ ...btnStyle, marginLeft: 8, padding: '8px 14px', fontSize: '0.95rem' }}
-              onClick={() => {
-                if (wordChainInput.trim()) {
-                  setWordChainList([...wordChainList, wordChainInput]);
-                  setWordChainInput("");
-                }
-              }}
-            >Add</button>
-            <div style={{ marginTop: 10, textAlign: 'left' }}>
+          <div className="game-input-block">
+            <div className="game-input-row">
+              <input
+                type="text"
+                value={wordChainInput}
+                onChange={e => setWordChainInput(e.target.value)}
+                placeholder="Continue the chain..."
+              />
+              <button
+                className="game-button"
+                onClick={() => {
+                  if (wordChainInput.trim()) {
+                    const newScore = wordChainList.length + 1;
+                    setWordChainList([...wordChainList, wordChainInput]);
+                    saveGameActivity('word_chain', newScore, { word: wordChainInput });
+                    setWordChainInput("");
+                  }
+                }}
+                type="button"
+              >
+                Add
+              </button>
+            </div>
+            <div className="game-list">
               {wordChainList.map((w, i) => (
-                <div key={i} style={{ color: '#1976d2', fontWeight: 500, marginBottom: 4 }}>🔗 {w}</div>
+                <div key={i} className="game-list-item info">{w}</div>
               ))}
             </div>
           </div>
         )}
         {/* Emoji Movie Guess input */}
         {isEmojiGameInput && (
-          <div style={{ margin: '12px 0' }}>
-            <input
-              type="text"
-              value={emojiInput}
-              onChange={e => setEmojiInput(e.target.value)}
-              placeholder="Your movie guess..."
-              style={{ padding: '8px', borderRadius: 8, border: '1px solid #ffc107', width: '80%' }}
-              disabled={emojiShowAnswer}
-            />
-            <button
-              style={{ ...btnStyle, marginLeft: 8, padding: '8px 14px', fontSize: '0.95rem' }}
-              disabled={emojiShowAnswer}
-              onClick={() => {
-                if (emojiInput.trim()) {
-                  if (emojiInput.trim().toLowerCase() === question.a.toLowerCase()) {
-                    setEmojiFeedback('✅ Correct!');
-                  } else {
-                    setEmojiFeedback('❌ Not quite.');
+          <div className="game-input-block">
+            <div className="game-input-row">
+              <input
+                type="text"
+                value={emojiInput}
+                onChange={e => setEmojiInput(e.target.value)}
+                placeholder="Your movie guess..."
+                disabled={emojiShowAnswer}
+              />
+              <button
+                className="game-button"
+                disabled={emojiShowAnswer}
+                onClick={() => {
+                  if (emojiInput.trim()) {
+                    const isCorrect = emojiInput.trim().toLowerCase() === question.a.toLowerCase();
+                    if (isCorrect) {
+                      setEmojiFeedback('Correct!');
+                    } else {
+                      setEmojiFeedback('Not quite.');
+                    }
+                    saveGameActivity('emoji_guess', isCorrect ? 1 : 0, { guess: emojiInput });
+                    setEmojiShowAnswer(true);
                   }
-                  setEmojiShowAnswer(true);
-                }
-              }}
-            >Submit</button>
+                }}
+                type="button"
+              >
+                Submit
+              </button>
+            </div>
             {emojiFeedback && (
-              <div style={{ marginTop: 10, fontWeight: 500, color: emojiFeedback.includes('Correct') ? '#388e3c' : '#d63384' }}>{emojiFeedback}</div>
+              <div className={`game-feedback ${emojiFeedback.includes('Correct') ? 'success' : 'danger'}`}>
+                {emojiFeedback}
+              </div>
             )}
             {emojiShowAnswer && (
-              <div style={{ marginTop: 10, color: '#1976d2', fontWeight: 600 }}>Answer: {question.a}</div>
+              <div className="game-answer">Answer: {question.a}</div>
             )}
           </div>
         )}
         {/* Show answer for other games */}
         {question.a && showAnswer && !isGratitude && !isWordChain && !isEmojiGame && (
-          <div style={{ marginTop: 16, color: '#d63384', fontWeight: 600 }}>
-            Answer: {question.a}
-          </div>
+          <div className="game-answer">Answer: {question.a}</div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 12 }}>
-          <button onClick={() => { setQIdx((qIdx + 1) % game.questions.length); setShowAnswer(false); setEmojiInput(""); setEmojiFeedback(""); setEmojiShowAnswer(false); }} style={btnStyle}>🔄 New Question</button>
+        <div className="games-actions">
+          <button
+            onClick={() => { setQIdx((qIdx + 1) % game.questions.length); setShowAnswer(false); setEmojiInput(""); setEmojiFeedback(""); setEmojiShowAnswer(false); }}
+            className="game-button"
+            type="button"
+          >
+            New Question
+          </button>
           {question.a && !isGratitude && !isWordChain && !isEmojiGame && (
-            <button onClick={() => setShowAnswer(true)} style={btnStyle}>Show Answer</button>
+            <button onClick={() => setShowAnswer(true)} className="game-button" type="button">Show Answer</button>
           )}
-          <button onClick={() => {
-            const next = (openGameIdx + 1) % games.length;
-            setOpenGameIdx(next);
-            setQIdx(0);
-            setShowAnswer(false);
-            setEmojiInput("");
-            setEmojiFeedback("");
-            setEmojiShowAnswer(false);
-          }} style={btnStyle}>🎲 Random Game</button>
+          <button
+            onClick={() => {
+              const next = (openGameIdx + 1) % games.length;
+              setOpenGameIdx(next);
+              setQIdx(0);
+              setShowAnswer(false);
+              setEmojiInput("");
+              setEmojiFeedback("");
+              setEmojiShowAnswer(false);
+            }}
+            className="game-button"
+            type="button"
+          >
+            Random Game
+          </button>
         </div>
       </div>
     </div>
   );
 };
-
-const cardStyle = {
-  background: '#fffbe7',
-  border: '2px solid #ffc107',
-  borderRadius: 18,
-  padding: 18,
-  minWidth: 160,
-  minHeight: 160,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  boxShadow: '0 2px 8px #ffe0ec',
-  cursor: 'pointer',
-  transition: 'transform 0.2s',
-};
-
-const cardStyleSmall = {
-  background: '#fffbe7',
-  border: '2px solid #ffc107',
-  borderRadius: 14,
-  padding: 12,
-  minWidth: 140,
-  minHeight: 140,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  boxShadow: '0 2px 8px #ffe0ec',
-  cursor: 'pointer',
-  transition: 'transform 0.2s',
-};
-
-
-const cardStyleRect = {
-  background: '#fffbe7',
-  border: '2px solid #ffc107',
-  borderRadius: 18,
-  padding: 28,
-  minWidth: 420,
-  minHeight: 180,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  boxShadow: '0 2px 8px #ffe0ec',
-  cursor: 'pointer',
-  transition: 'transform 0.2s',
-};
-
-const btnStyle = {
-  background: '#ffc107',
-  color: '#856404',
-  border: 'none',
-  borderRadius: 12,
-  padding: '12px 28px',
-  fontWeight: 600,
-  fontSize: '1.08rem',
-  cursor: 'pointer',
-  margin: '2px 0',
-};
-
 export default Games;
