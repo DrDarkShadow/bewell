@@ -107,6 +107,23 @@ export const listeningApi = {
         }),
 
     /**
+     * Transcribe a single audio chunk (Blob) in real-time.
+     * Called every 5s by the MediaRecorder timeslice loop.
+     * Returns { text: "..." }
+     */
+    transcribeChunk: async (audioBlob) => {
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'chunk.webm');
+        const res = await fetch(`${BASE}/patient/listening/transcribe-chunk`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${getToken()}` },
+            body: formData,
+        });
+        if (!res.ok) return { text: '' };
+        return res.json();
+    },
+
+    /**
      * Generate a treatment plan from a session transcript.
      */
     generateTreatmentPlan: (transcript, summary = null) =>

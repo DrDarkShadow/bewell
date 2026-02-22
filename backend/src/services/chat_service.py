@@ -109,12 +109,28 @@ class ChatService:
             Message.conversation_id == conversation_id
         ).order_by(Message.timestamp.desc()).limit(15).all()[::-1]
 
+        # Count turns for gating in prompt
+        turn_count = self.db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.sender_type == "patient"
+        ).count()
+
         # Convert to LangGraph format
         chat_history = []
+
+        # Inject context header as a system message so the prompt gating works
+        stress_score = emotion_data.get("stress_score", 0) if isinstance(emotion_data, dict) else 0
+        context_header = (
+            f"[SESSION CONTEXT: Turn #{turn_count} | "
+            f"Current stress score: {stress_score:.0%} | "
+            f"Emotion: {emotion_data.get('emotions', {}).get('primary_emotion', 'unknown') if isinstance(emotion_data, dict) else 'unknown'}]"
+        )
+        chat_history.append({"role": "system", "content": context_header})
+
         for m in previous_messages:
             role = "user" if m.sender_type == "patient" else "assistant"
             chat_history.append({"role": role, "content": m.content})
-            
+
         # Add current message
         chat_history.append({"role": "user", "content": content})
 
@@ -161,10 +177,20 @@ class ChatService:
         conv.last_message_at = datetime.utcnow()
         self.db.commit()
 
+        # 8. Build suggestion based on stress level
+        stress_score = emotion_data.get("stress_score", 0) if isinstance(emotion_data, dict) else 0
+        if stress_score > 0.65:
+            suggestion = {"type": "breathing", "label": "Try Guided Breathing", "urgency": "high"}
+        elif stress_score > 0.4:
+            suggestion = {"type": "breathing", "label": "2-min Calm Exercise", "urgency": "medium"}
+        else:
+            suggestion = None
+
         return {
             "user_message": user_msg,
             "ai_message": ai_msg,
-            "emotion": emotion_data
+            "emotion": emotion_data,
+            "suggestion": suggestion,
         }
 
     def _get_conversation(self, conversation_id: int, user_id: int) -> Conversation:

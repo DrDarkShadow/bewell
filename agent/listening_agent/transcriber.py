@@ -54,28 +54,34 @@ def _decode_audio_bytes(audio_bytes: bytes) -> "np.ndarray":
     if av is not None:
         try:
             frames = []
-            sample_rate = None
             with av.open(io.BytesIO(audio_bytes)) as container:
                 stream = container.streams.audio[0]
-                sample_rate = stream.sample_rate
-                
-                # Resample to 16kHz for Whisper
+
                 resampler = av.audio.resampler.AudioResampler(
                     format='s16',
                     layout='mono',
                     rate=16000
                 )
-                
+
                 for frame in container.decode(stream):
-                    frame = resampler.resample(frame)[0] if resampler else frame
-                    arr = frame.to_ndarray()
-                    if arr.dtype.kind == "f":
-                        arr = np.clip(arr, -1.0, 1.0)
-                    else:
-                        arr = arr.astype(np.float32) / 32768.0
+                    for outframe in resampler.resample(frame):
+                        arr = outframe.to_ndarray()
+                        if arr.dtype.kind == "f":
+                            arr = np.clip(arr, -1.0, 1.0)
+                        else:
+                            arr = arr.astype(np.float32) / 32768.0
+                        if arr.ndim > 1:
+                            arr = arr.mean(axis=0)
+                        frames.append(arr)
+
+                # Flush any remaining buffered samples
+                for outframe in resampler.resample(None):
+                    arr = outframe.to_ndarray()
+                    arr = arr.astype(np.float32) / 32768.0
                     if arr.ndim > 1:
                         arr = arr.mean(axis=0)
                     frames.append(arr)
+
             if not frames:
                 raise ValueError("No audio frames decoded")
             return np.concatenate(frames)

@@ -101,6 +101,28 @@ async def transcribe_and_summarize(
         "summary": summary
     }
 
+@router.post("/transcribe-chunk")
+async def transcribe_chunk(
+    audio: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Transcribe a single audio chunk in real-time.
+    Called repeatedly by the frontend MediaRecorder as chunks arrive.
+    Returns just the transcribed text for that chunk.
+    """
+    audio_bytes = await audio.read()
+    if not audio_bytes or len(audio_bytes) < 1000:
+        # Too small to transcribe meaningfully (< 1KB = silence/noise)
+        return {"text": ""}
+    try:
+        text = transcriber.transcribe_bytes(audio_bytes)
+        return {"text": text or ""}
+    except Exception as exc:
+        # Don't fail the whole session on a bad chunk — just skip it
+        return {"text": ""}
+
+
 @router.post("/summarize")
 async def summarize_transcript(
     payload: SummarizeRequest,

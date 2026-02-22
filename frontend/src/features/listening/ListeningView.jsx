@@ -1,218 +1,415 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { listeningApi, activitiesApi } from '../../services/api';
 
-const WaveBar = ({ index, isRecording }) => (
+/* ── Animated mic wave bar ── */
+const WaveBar = ({ i, active }) => (
     <div style={{
-        width: '4px', background: 'white', borderRadius: '2px', opacity: isRecording ? 0.9 : 0.4,
-        height: isRecording ? `${20 + Math.random() * 24}px` : '8px',
-        animation: isRecording ? `wave ${0.6 + index * 0.1}s ease-in-out infinite alternate` : 'none',
-        animationDelay: `${index * 0.08}s`,
-        transition: 'height 0.3s ease',
+        width: '3px', borderRadius: '2px',
+        background: active ? 'white' : 'rgba(255,255,255,0.35)',
+        height: active ? `${10 + Math.sin(Date.now() / 200 + i) * 12 + 12}px` : '4px',
+        animation: active ? `wave ${0.5 + i * 0.07}s ease-in-out infinite alternate` : 'none',
+        animationDelay: `${i * 0.06}s`,
+        transition: 'height 0.25s ease, background 0.3s',
     }} />
 );
 
+/* ── Live "pulsing word" component ── */
+const LiveWord = ({ text }) => (
+    <span style={{
+        display: 'inline', padding: '1px 4px', borderRadius: '4px',
+        background: 'rgba(6,182,212,0.12)', color: '#0e7490',
+        animation: 'fadeIn 0.3s ease',
+    }}>{text} </span>
+);
+
+const CHUNK_INTERVAL_MS = 5000; // send a transcription chunk every 5s
+const BARS = Array.from({ length: 14 });
+
 const ListeningView = () => {
-    const [isRecording, setIsRecording] = useState(false);
+    const [phase, setPhase] = useState('idle'); // idle | recording | summarizing | done
     const [elapsed, setElapsed] = useState(0);
-    const [summary, setSummary] = useState(null);
-    const [summarizing, setSummarizing] = useState(false);
+    const [transcript, setTranscript] = useState('');         // accumulated text
+    const [liveWords, setLiveWords] = useState('');           // latest chunk words (highlighted)
+    const [summary, setSummary] = useState('');
     const [summaryError, setSummaryError] = useState('');
-    const [transcript, setTranscript] = useState('');
-    const [showTranscriptInput, setShowTranscriptInput] = useState(false);
-    const [bars] = useState(Array.from({ length: 12 }));
+    const [chunkProcessing, setChunkProcessing] = useState(false);
+
     const timerRef = useRef(null);
-    const startTimeRef = useRef(null);
+    const mediaRecorderRef = useRef(null);
+    const streamRef = useRef(null);
+    const transcriptRef = useRef('');  // ref so chunk callbacks always have latest value
+    const transcriptBoxRef = useRef(null);
+    const summaryBoxRef = useRef(null);
 
+    // Keep ref in sync
+    useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+
+    // Timer
     useEffect(() => {
-        if (isRecording) { timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000); }
-        else clearInterval(timerRef.current);
+        if (phase === 'recording') {
+            timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+        } else {
+            clearInterval(timerRef.current);
+        }
         return () => clearInterval(timerRef.current);
-    }, [isRecording]);
+    }, [phase]);
 
-    const formatTimer = s => {
+    // Auto-scroll transcript box to bottom
+    useEffect(() => {
+        if (transcriptBoxRef.current) {
+            transcriptBoxRef.current.scrollTop = transcriptBoxRef.current.scrollHeight;
+        }
+    }, [transcript, liveWords]);
+
+    const fmt = s => {
         const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
     };
 
-    const handleComplete = () => {
-        setIsRecording(false);
-        setShowTranscriptInput(true);
+    const appendTranscript = useCallback((text) => {
+        if (!text?.trim()) return;
+        const clean = text.trim();
+        setLiveWords(clean);
+        setTranscript(prev => {
+            const sep = prev.length > 0 ? ' ' : '';
+            return prev + sep + clean;
+        });
+        // Clear live highlight after 1.5s
+        setTimeout(() => setLiveWords(''), 1500);
+    }, []);
+
+    const sendChunk = useCallback(async (blob) => {
+        if (!blob || blob.size < 1000) return;
+        setChunkProcessing(true);
+        try {
+            const result = await listeningApi.transcribeChunk(blob);
+            if (result?.text) appendTranscript(result.text);
+        } catch (e) {
+            // silently skip bad chunks
+        } finally {
+            setChunkProcessing(false);
+        }
+    }, [appendTranscript]);
+
+    const startRecording = async () => {
+        setSummaryError('');
+        setTranscript('');
+        setLiveWords('');
+        setSummary('');
+        setElapsed(0);
+        transcriptRef.current = '';
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            streamRef.current = stream;
+
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : MediaRecorder.isTypeSupported('audio/webm')
+                    ? 'audio/webm'
+                    : 'audio/ogg';
+
+            const recorder = new MediaRecorder(stream, { mimeType });
+            mediaRecorderRef.current = recorder;
+
+            // timeslice: fires ondataavailable every CHUNK_INTERVAL_MS
+            recorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) sendChunk(e.data);
+            };
+
+            recorder.start(CHUNK_INTERVAL_MS);
+            setPhase('recording');
+        } catch (err) {
+            setSummaryError('Microphone access denied. Please allow microphone access and try again.');
+        }
     };
 
-    const handleSummarize = async () => {
+    const stopRecording = async () => {
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state !== 'inactive') {
+            // request the last chunk before stopping
+            recorder.requestData();
+            recorder.stop();
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop());
+            streamRef.current = null;
+        }
+
+        setPhase('summarizing');
+        setSummaryError('');
+
+        // Give the last chunk a moment to process
+        await new Promise(r => setTimeout(r, 800));
+
+        const fullTranscript = transcriptRef.current;
+
+        if (!fullTranscript.trim()) {
+            setPhase('done');
+            setSummaryError('No speech was detected. Please try again and speak clearly.');
+            return;
+        }
+
+        try {
+            const result = await listeningApi.summarize(fullTranscript, true);
+            setSummary(result.summary || '');
+            // Log session activity
+            activitiesApi.log('session', null, elapsed).catch(() => { });
+            setPhase('done');
+            // Scroll to summary
+            setTimeout(() => summaryBoxRef.current?.scrollIntoView({ behavior: 'smooth' }), 200);
+        } catch (e) {
+            setSummaryError('Failed to generate summary. You can try again below.');
+            setPhase('done');
+        }
+    };
+
+    const reset = () => {
+        setPhase('idle');
+        setTranscript('');
+        setLiveWords('');
+        setSummary('');
+        setSummaryError('');
+        setElapsed(0);
+        transcriptRef.current = '';
+    };
+
+    const retrySummary = async () => {
         if (!transcript.trim()) return;
-        setSummarizing(true); setSummaryError('');
+        setPhase('summarizing');
+        setSummaryError('');
         try {
             const result = await listeningApi.summarize(transcript, true);
-            const raw = result.summary || '';
-            // Log the session duration as a wellness activity
-            activitiesApi.log('session', null, elapsed).catch(() => { });
-            setSummary({ raw, concerns: [], emotionalState: '"Analyzed"', emotionalNote: 'AI-generated clinical summary below.' });
-            setShowTranscriptInput(false);
+            setSummary(result.summary || '');
+            setPhase('done');
         } catch (e) {
-            setSummaryError(e.message || 'Failed to generate summary');
-        } finally {
-            setSummarizing(false);
+            setSummaryError('Summary failed. Please check your connection.');
+            setPhase('done');
         }
     };
 
     return (
-        <div style={{ minHeight: '100vh', background: '#f6f8fa', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px' }}>
-            {/* Session Tag */}
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', letterSpacing: '0.12em', marginBottom: '16px', textTransform: 'uppercase' }}>
-                {isRecording ? '● ACTIVE SESSION · ID #88421' : 'READY TO RECORD'}
-            </div>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif" }}>
 
-            <h1 style={{ margin: '0 0 8px', fontSize: '26px', fontWeight: '700', color: '#1e293b', fontFamily: "'Lora', serif" }}>
-                {isRecording ? 'Listening to Session' : 'Start a New Session'}
-            </h1>
-            <p style={{ margin: '0 0 40px', color: '#64748b', fontSize: '14px', textAlign: 'center', maxWidth: '360px', lineHeight: 1.6 }}>
-                {isRecording ? "Focus on the conversation. I'm capturing key clinical indicators in real-time." : 'Press the button below to begin recording the session.'}
-            </p>
-
-            {/* Recording Circle */}
-            <div style={{ position: 'relative', width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '32px' }}>
-                {isRecording && (
-                    <div style={{ position: 'absolute', width: '220px', height: '220px', borderRadius: '50%', border: '2px solid rgba(6,182,212,0.25)', animation: 'ping 2s ease-in-out infinite' }} />
-                )}
-                <div style={{ position: 'absolute', width: '200px', height: '200px', borderRadius: '50%', background: isRecording ? 'rgba(6,182,212,0.12)' : 'rgba(6,182,212,0.06)' }} />
-                <div style={{
-                    width: '150px', height: '150px', borderRadius: '50%',
-                    background: isRecording ? 'linear-gradient(135deg, #06b6d4, #0284c7)' : '#e2e8f0',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                    boxShadow: isRecording ? '0 0 40px rgba(6,182,212,0.4)' : 'none', transition: 'all 0.4s ease',
-                }}>
-                    <div style={{ display: 'flex', gap: '3px', alignItems: 'center', height: '28px' }}>
-                        {bars.map((_, i) => <WaveBar key={i} index={i} isRecording={isRecording} />)}
-                    </div>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill={isRecording ? 'white' : '#94a3b8'}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke={isRecording ? 'white' : '#94a3b8'} strokeWidth="2" /></svg>
-                    {isRecording && <div style={{ fontSize: '10px', fontWeight: '700', color: 'white', letterSpacing: '0.1em' }}>LISTENING</div>}
+            {/* ── Top recording area ── */}
+            <div style={{
+                background: 'linear-gradient(140deg, #0c1a2e 0%, #0f2540 60%, #0a3a4a 100%)',
+                padding: '32px 32px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                flexShrink: 0,
+            }}>
+                {/* Status tag */}
+                <div style={{ fontSize: '10px', fontWeight: '700', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '6px', color: phase === 'recording' ? '#34d399' : '#64748b' }}>
+                    {phase === 'recording' && <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#34d399', display: 'inline-block', animation: 'blink 1s ease-in-out infinite' }} />}
+                    {phase === 'recording' ? 'LIVE SESSION' : phase === 'summarizing' ? '⚙  GENERATING SUMMARY…' : phase === 'done' ? '✓ SESSION COMPLETE' : 'READY TO RECORD'}
                 </div>
-            </div>
 
-            {/* Timer */}
-            <div style={{ fontSize: '36px', fontWeight: '300', color: '#1e293b', letterSpacing: '0.08em', marginBottom: '24px', fontFamily: 'monospace' }}>
-                {formatTimer(elapsed)}
-            </div>
-
-            {/* Controls */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-                {!isRecording && !summary ? (
-                    <button onClick={() => { setIsRecording(true); setElapsed(0); }} style={{
-                        padding: '12px 32px', borderRadius: '25px', border: 'none',
-                        background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: 'white',
-                        fontWeight: '600', fontSize: '15px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
-                        boxShadow: '0 4px 14px rgba(6,182,212,0.4)',
+                {/* Microphone orb */}
+                <div style={{ position: 'relative', width: '150px', height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '20px' }}>
+                    {phase === 'recording' && <>
+                        <div style={{ position: 'absolute', width: '190px', height: '190px', borderRadius: '50%', border: '1.5px solid rgba(6,182,212,0.20)', animation: 'ping 2.4s ease-in-out infinite' }} />
+                        <div style={{ position: 'absolute', width: '170px', height: '170px', borderRadius: '50%', border: '1.5px solid rgba(6,182,212,0.13)', animation: 'ping 2.4s ease-in-out infinite 0.6s' }} />
+                    </>}
+                    <div style={{
+                        width: '130px', height: '130px', borderRadius: '50%',
+                        background: phase === 'recording'
+                            ? 'linear-gradient(135deg, #06b6d4, #0284c7)'
+                            : phase === 'summarizing'
+                                ? 'linear-gradient(135deg, #7c3aed, #4f46e5)'
+                                : '#1e3a5f',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                        boxShadow: phase === 'recording' ? '0 0 50px rgba(6,182,212,0.35)' : 'none',
+                        transition: 'all 0.5s cubic-bezier(0.4,0,0.2,1)',
                     }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'white' }} />
-                        Start Recording
-                    </button>
-                ) : isRecording && (
-                    <>
-                        <button onClick={handleComplete} style={{
-                            padding: '12px 28px', borderRadius: '25px', border: 'none',
-                            background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: 'white',
-                            fontWeight: '600', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
-                        }}>
-                            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'white' }} />
-                            Complete Recording
-                        </button>
-                        <button onClick={() => { setIsRecording(false); setElapsed(0); }} style={{
-                            padding: '12px 24px', borderRadius: '25px', border: '1.5px solid #e2e8f0',
-                            background: 'white', color: '#64748b', fontWeight: '500', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
-                        }}>
-                            × Cancel
-                        </button>
-                    </>
-                )}
-            </div>
-
-            {/* Privacy badge */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '25px', padding: '8px 16px', fontSize: '12px', color: '#0284c7', marginBottom: '24px' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
-                Your audio is encrypted and processed securely. HIPAA Compliant.
-            </div>
-
-            {/* Transcript input panel — shown after recording stops */}
-            {showTranscriptInput && (
-                <div style={{ width: '100%', maxWidth: '560px', background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 1px 8px rgba(0,0,0,0.08)', marginBottom: '20px' }}>
-                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#1e293b', marginBottom: '6px' }}>Session Recorded — Add Transcript</div>
-                    <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#64748b' }}>
-                        Paste or type the session transcript below. The AI will analyze it and generate a clinical summary.
-                    </p>
-                    <textarea value={transcript} onChange={e => setTranscript(e.target.value)}
-                        placeholder="e.g. Patient: I've been feeling really anxious about work... Therapist: Can you describe what triggers this?..."
-                        style={{ width: '100%', minHeight: '120px', padding: '12px', borderRadius: '10px', border: '1.5px solid #e2e8f0', fontSize: '13px', resize: 'vertical', outline: 'none', boxSizing: 'border-box', color: '#374151', lineHeight: '1.5', fontFamily: 'inherit' }}
-                        onFocus={e => e.target.style.borderColor = '#06b6d4'} onBlur={e => e.target.style.borderColor = '#e2e8f0'} />
-                    {summaryError && <div style={{ marginTop: '8px', fontSize: '12px', color: '#ef4444' }}>{summaryError}</div>}
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                        <button onClick={handleSummarize} disabled={!transcript.trim() || summarizing} style={{
-                            flex: 1, padding: '11px', borderRadius: '10px', border: 'none',
-                            background: transcript.trim() ? 'linear-gradient(135deg, #06b6d4, #3b82f6)' : '#e2e8f0',
-                            color: 'white', fontWeight: '600', fontSize: '13px', cursor: transcript.trim() ? 'pointer' : 'default',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                        }}>
-                            {summarizing
-                                ? <><div style={{ width: '14px', height: '14px', border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} /> Analyzing…</>
-                                : '🧠 Analyze with AI →'}
-                        </button>
-                        <button onClick={() => setShowTranscriptInput(false)} style={{ padding: '11px 18px', borderRadius: '10px', border: '1px solid #e2e8f0', background: 'white', color: '#64748b', fontSize: '13px', cursor: 'pointer' }}>
-                            Skip
-                        </button>
+                        {phase === 'summarizing' ? (
+                            <div style={{ width: '28px', height: '28px', border: '3px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        ) : (
+                            <>
+                                <div style={{ display: 'flex', gap: '2px', alignItems: 'center', height: '24px' }}>
+                                    {BARS.map((_, i) => <WaveBar key={i} i={i} active={phase === 'recording'} />)}
+                                </div>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill={phase === 'recording' ? 'white' : '#475569'}>
+                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke={phase === 'recording' ? 'white' : '#475569'} strokeWidth="2" />
+                                </svg>
+                            </>
+                        )}
                     </div>
                 </div>
-            )}
 
+                {/* Timer */}
+                <div style={{ fontSize: '34px', fontWeight: '200', color: 'white', letterSpacing: '0.10em', fontFamily: 'monospace', marginBottom: '22px', opacity: phase === 'idle' ? 0.3 : 1, transition: 'opacity 0.4s' }}>
+                    {fmt(elapsed)}
+                </div>
 
-            {/* Summary */}
-            {summary && (
-                <div style={{ width: '100%', maxWidth: '560px', background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '14px', color: '#1e293b' }}>
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-                            Session Insights Summary
+                {/* Live chunk badge */}
+                {chunkProcessing && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', borderRadius: '20px', padding: '4px 12px', fontSize: '11px', color: '#67e8f9', marginBottom: '14px' }}>
+                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06b6d4', animation: 'blink 0.8s ease-in-out infinite' }} />
+                        Transcribing chunk…
+                    </div>
+                )}
+
+                {/* Controls */}
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    {phase === 'idle' && (
+                        <button onClick={startRecording} style={{ padding: '12px 32px', borderRadius: '28px', border: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', boxShadow: '0 4px 18px rgba(6,182,212,0.40)', display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'inherit' }}>
+                            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'white' }} />
+                            Start Recording
+                        </button>
+                    )}
+                    {phase === 'recording' && (
+                        <>
+                            <button onClick={stopRecording} style={{ padding: '12px 28px', borderRadius: '28px', border: 'none', background: '#ef4444', color: 'white', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontFamily: 'inherit' }}>
+                                <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: 'white' }} />
+                                Stop &amp; Summarize
+                            </button>
+                            <button onClick={reset} style={{ padding: '12px 20px', borderRadius: '28px', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#94a3b8', fontWeight: '500', fontSize: '14px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                Cancel
+                            </button>
+                        </>
+                    )}
+                    {phase === 'done' && (
+                        <button onClick={reset} style={{ padding: '12px 28px', borderRadius: '28px', border: 'none', background: 'rgba(255,255,255,0.08)', color: 'white', fontWeight: '600', fontSize: '14px', cursor: 'pointer', border: '1px solid rgba(255,255,255,0.15)', fontFamily: 'inherit' }}>
+                            + New Recording
+                        </button>
+                    )}
+                </div>
+
+                {/* Privacy badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '16px', fontSize: '11px', color: '#475569' }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                    Encrypted · HIPAA Compliant · Audio never stored
+                </div>
+            </div>
+
+            {/* ── Bottom 2-panel area ── */}
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', gap: 0, background: '#f4f6fb' }}>
+
+                {/* Transcript Panel */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e8edf4' }}>
+                    <div style={{ padding: '16px 20px 10px', background: 'white', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: phase === 'recording' ? '#22c55e' : '#e2e8f0', transition: '0.3s', boxShadow: phase === 'recording' ? '0 0 6px #22c55e' : 'none' }} />
+                            <span style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>Live Transcript</span>
                         </div>
-                        <span style={{ fontSize: '11px', fontWeight: '700', background: '#fef3c7', color: '#d97706', padding: '4px 10px', borderRadius: '20px' }}>
-                            ⚠ RISK LEVEL: {summary.riskLevel}
+                        <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>
+                            {transcript ? `${transcript.split(' ').length} words` : phase === 'recording' ? 'Listening…' : 'Not started'}
                         </span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                        <div>
-                            <div style={{ fontSize: '10px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '10px' }}>Key Concerns</div>
-                            {summary.concerns.map((c, i) => (
-                                <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '8px', fontSize: '13px', color: '#374151' }}>
-                                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#06b6d4', marginTop: '6px', flexShrink: 0 }} />
-                                    {c}
-                                </div>
-                            ))}
-                        </div>
-                        <div>
-                            <div style={{ fontSize: '10px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '10px' }}>Emotional State</div>
-                            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '10px', marginBottom: '12px' }}>
-                                <div style={{ fontSize: '14px', fontWeight: '700', color: '#1e293b', fontStyle: 'italic' }}>{summary.emotionalState}</div>
-                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>{summary.emotionalNote}</div>
+
+                    <div ref={transcriptBoxRef} style={{ flex: 1, overflowY: 'auto', padding: '20px', fontSize: '14px', lineHeight: '1.8', color: '#334155' }}>
+                        {!transcript && phase === 'idle' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', color: '#94a3b8' }}>
+                                <div style={{ fontSize: '32px', marginBottom: '10px', opacity: 0.4 }}>🎙</div>
+                                <div style={{ fontSize: '13px', lineHeight: 1.6 }}>Press <strong>Start Recording</strong> and speak.<br />Your words will appear here in real time.</div>
                             </div>
-                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Sentiment Flow</div>
-                            <div style={{ display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', gap: '2px' }}>
-                                {['#22c55e', '#86efac', '#fbbf24', '#f97316', '#ef4444', '#f97316', '#fbbf24', '#22c55e'].map((c, i) => (
-                                    <div key={i} style={{ flex: 1, background: c, borderRadius: '2px' }} />
-                                ))}
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>
-                                <span>START</span><span>END</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
-                        <button style={{ border: 'none', background: 'none', color: '#94a3b8', fontSize: '13px', cursor: 'pointer' }}>Discard Draft</button>
-                        <button style={{ border: 'none', background: 'none', color: '#06b6d4', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>View Detailed Report →</button>
+                        )}
+                        {!transcript && phase === 'recording' && (
+                            <div style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', animation: 'fadeIn 0.5s' }}>Waiting for speech…</div>
+                        )}
+                        {transcript && (
+                            <span>
+                                {/* Show accumulated text in dark, new chunk highlighted */}
+                                {liveWords
+                                    ? <>{transcript.slice(0, transcript.length - liveWords.length - 1).trimEnd()}&nbsp;<LiveWord text={liveWords} /></>
+                                    : transcript
+                                }
+                            </span>
+                        )}
                     </div>
                 </div>
-            )}
+
+                {/* Summary Panel */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ padding: '16px 20px 10px', background: 'white', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+                            <span style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>AI Summary</span>
+                        </div>
+                        {phase === 'summarizing' && (
+                            <span style={{ fontSize: '11px', color: '#6366f1', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <div style={{ width: '10px', height: '10px', border: '1.5px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                                Generating…
+                            </span>
+                        )}
+                        {phase === 'done' && summary && (
+                            <span style={{ fontSize: '11px', background: '#f0fdf4', color: '#16a34a', padding: '2px 8px', borderRadius: '12px', fontWeight: '600' }}>✓ Complete</span>
+                        )}
+                    </div>
+
+                    <div ref={summaryBoxRef} style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+                        {!summary && phase !== 'summarizing' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', color: '#94a3b8' }}>
+                                <div style={{ fontSize: '32px', marginBottom: '10px', opacity: 0.4 }}>🧠</div>
+                                <div style={{ fontSize: '13px', lineHeight: 1.6 }}>
+                                    {phase === 'done' && !summary
+                                        ? 'Summary not generated yet.'
+                                        : 'Your AI-generated clinical summary will appear here when you stop recording.'}
+                                </div>
+                                {phase === 'done' && transcript && !summary && (
+                                    <button onClick={retrySummary} style={{ marginTop: '14px', padding: '10px 24px', borderRadius: '20px', border: 'none', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: 'white', fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                        Retry Summary →
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {phase === 'summarizing' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {[80, 60, 90, 50, 70].map((w, i) => (
+                                    <div key={i} style={{ height: '12px', borderRadius: '6px', background: 'linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%)', width: `${w}%`, animation: 'shimmer 1.4s ease-in-out infinite', animationDelay: `${i * 0.15}s` }} />
+                                ))}
+                            </div>
+                        )}
+
+                        {summary && (
+                            <div style={{ animation: 'fadeIn 0.5s ease' }}>
+                                <div style={{ background: 'white', borderRadius: '14px', padding: '18px', boxShadow: '0 1px 6px rgba(15,23,42,0.05)', border: '1px solid #e8edf4' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                        <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <span style={{ fontSize: '14px' }}>🧠</span>
+                                        </div>
+                                        <div>
+                                            <div style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>Clinical Summary</div>
+                                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>AI-generated · Requires clinician review</div>
+                                        </div>
+                                    </div>
+                                    <div style={{ fontSize: '13.5px', color: '#334155', lineHeight: '1.75', whiteSpace: 'pre-wrap' }}>
+                                        {summary}
+                                    </div>
+                                </div>
+
+                                <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                                    <button onClick={retrySummary} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: '600', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                        ↺ Regenerate
+                                    </button>
+                                    <button style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: 'white', fontWeight: '600', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                                        Export Report →
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {summaryError && (
+                            <div style={{ marginTop: '12px', padding: '12px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', fontSize: '13px', color: '#dc2626', lineHeight: 1.5 }}>
+                                {summaryError}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             <style>{`
-        @keyframes ping { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.15);opacity:0.5} }
-        @keyframes wave { from{height:6px} to{height:32px} }
-      `}</style>
+                @keyframes ping { 0%,100%{transform:scale(1);opacity:0.8} 50%{transform:scale(1.18);opacity:0.2} }
+                @keyframes wave { from{height:4px} to{height:28px} }
+                @keyframes spin { to{transform:rotate(360deg)} }
+                @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.25} }
+                @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+                @keyframes shimmer {
+                    0%{background-position:200% 0}
+                    100%{background-position:-200% 0}
+                }
+            `}</style>
         </div>
     );
 };

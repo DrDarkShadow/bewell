@@ -55,44 +55,66 @@ const PatientShell = () => {
     const initials = (user?.name || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 
     return (
-        <div style={{ display: 'flex', height: '100vh', background: '#f6f7fb', overflow: 'hidden', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
+        <div style={{ display: 'flex', height: '100vh', background: '#f4f6fb', overflow: 'hidden', fontFamily: "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
             {/* Left Sidebar */}
-            <aside style={{ width: '200px', minWidth: '200px', background: 'white', borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', padding: '24px 16px', boxShadow: '2px 0 8px rgba(0,0,0,0.03)' }}>
+            <aside style={{
+                width: '210px', minWidth: '210px', background: 'white',
+                borderRight: '1px solid #eef2f8', display: 'flex', flexDirection: 'column',
+                padding: '22px 14px 18px',
+                boxShadow: '1px 0 16px rgba(15,23,42,0.04)',
+            }}>
                 {/* Logo */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '32px', paddingLeft: '8px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '10px', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '28px', paddingLeft: '6px' }}>
+                    <div style={{
+                        width: '34px', height: '34px', borderRadius: '12px',
+                        background: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 4px 12px rgba(6,182,212,0.30)',
+                    }}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 21.593c-5.63-5.539-11-10.297-11-14.402 0-3.791 3.068-5.191 5.281-5.191 1.312 0 4.151.501 5.719 4.457 1.59-3.968 4.464-4.447 5.726-4.447 2.54 0 5.274 1.621 5.274 5.181 0 4.069-5.136 8.625-11 14.402z" /></svg>
                     </div>
                     <div>
-                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#1e293b' }}>BeWell</div>
-                        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '500' }}>Patient Portal</div>
+                        <div style={{ fontWeight: '800', fontSize: '14px', color: '#0f172a', letterSpacing: '-0.02em' }}>BeWell</div>
+                        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '500', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Patient Portal</div>
                     </div>
                 </div>
 
                 {/* Nav */}
-                <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     {NAV_ITEMS.map(item => (
                         <button key={item.id} onClick={() => setActiveView(item.id)} style={{
-                            display: 'flex', alignItems: 'center', gap: '12px',
-                            padding: '10px 12px', borderRadius: '10px', border: 'none',
-                            cursor: 'pointer', textAlign: 'left', fontSize: '13px', fontWeight: '500', transition: 'all 130ms ease',
-                            background: activeView === item.id ? 'linear-gradient(135deg, #ecfeff, #eff6ff)' : 'transparent',
+                            display: 'flex', alignItems: 'center', gap: '11px',
+                            padding: '10px 12px', borderRadius: '12px', border: 'none',
+                            cursor: 'pointer', textAlign: 'left',
+                            fontSize: '13.5px', fontWeight: activeView === item.id ? '700' : '500',
+                            fontFamily: 'inherit',
+                            transition: 'all 160ms cubic-bezier(0.4,0,0.2,1)',
+                            background: activeView === item.id
+                                ? 'linear-gradient(135deg, rgba(6,182,212,0.10), rgba(59,130,246,0.07))'
+                                : 'transparent',
                             color: activeView === item.id ? '#0891b2' : '#64748b',
-                            boxShadow: activeView === item.id ? 'inset 0 0 0 1px rgba(6,182,212,0.2)' : 'none',
-                        }}>
-                            <span style={{ color: activeView === item.id ? '#06b6d4' : '#94a3b8', display: 'flex', transition: '0.13s' }}>{item.icon}</span>
+                            boxShadow: activeView === item.id ? 'inset 0 0 0 1.5px rgba(6,182,212,0.18)' : 'none',
+                        }}
+                            onMouseEnter={e => { if (activeView !== item.id) e.currentTarget.style.background = 'rgba(15,23,42,0.035)'; }}
+                            onMouseLeave={e => { if (activeView !== item.id) e.currentTarget.style.background = 'transparent'; }}
+                        >
+                            <span style={{ color: activeView === item.id ? '#06b6d4' : '#94a3b8', display: 'flex', transition: 'color 160ms' }}>{item.icon}</span>
                             {item.label}
                         </button>
                     ))}
                 </nav>
 
                 {/* Bottom */}
-                <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
-                    <button onClick={() => setShowSettings(true)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '10px', border: 'none', cursor: 'pointer', background: 'transparent', color: '#64748b', fontSize: '13px', fontWeight: '500', width: '100%' }}>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+                <div style={{ borderTop: '1px solid #eef2f8', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <button onClick={() => setShowSettings(true)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '12px', border: 'none', cursor: 'pointer', background: 'transparent', color: '#64748b', fontSize: '13px', fontWeight: '500', width: '100%', fontFamily: 'inherit', transition: 'background 160ms' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(15,23,42,0.035)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
                         Settings
                     </button>
-                    <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '10px', border: 'none', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: '13px', fontWeight: '500', width: '100%' }}>
+                    <button onClick={logout} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderRadius: '12px', border: 'none', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: '13px', fontWeight: '500', width: '100%', fontFamily: 'inherit', transition: 'background 160ms' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.06)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
                         Log Out
                     </button>
