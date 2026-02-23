@@ -1,0 +1,308 @@
+"use client"
+
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Users,
+  CalendarDays,
+  FileText,
+  ArrowRight,
+} from "lucide-react"
+import Link from "next/link"
+
+const flaggedPatients = [
+  {
+    name: "Alex M.",
+    initials: "AM",
+    reason: "Stress score spike: 42 → 78 in 48h",
+    severity: "high" as const,
+    lastSession: "2 days ago",
+  },
+  {
+    name: "Jordan K.",
+    initials: "JK",
+    reason: "Missed 2 consecutive check-ins",
+    severity: "medium" as const,
+    lastSession: "5 days ago",
+  },
+  {
+    name: "Sam T.",
+    initials: "ST",
+    reason: "Journal sentiment shift detected",
+    severity: "medium" as const,
+    lastSession: "1 day ago",
+  },
+]
+
+const recentPatients = [
+  {
+    name: "Alex M.",
+    initials: "AM",
+    stressScore: 78,
+    trend: "up" as const,
+    lastSession: "Feb 20, 2026",
+    nextSession: "Feb 24, 2026",
+    sessions: 12,
+  },
+  {
+    name: "Jordan K.",
+    initials: "JK",
+    stressScore: 45,
+    trend: "down" as const,
+    lastSession: "Feb 17, 2026",
+    nextSession: "Feb 25, 2026",
+    sessions: 8,
+  },
+  {
+    name: "Sam T.",
+    initials: "ST",
+    stressScore: 52,
+    trend: "stable" as const,
+    lastSession: "Feb 21, 2026",
+    nextSession: "Feb 28, 2026",
+    sessions: 15,
+  },
+  {
+    name: "Casey R.",
+    initials: "CR",
+    stressScore: 31,
+    trend: "down" as const,
+    lastSession: "Feb 19, 2026",
+    nextSession: "Feb 26, 2026",
+    sessions: 6,
+  },
+  {
+    name: "Morgan L.",
+    initials: "ML",
+    stressScore: 63,
+    trend: "up" as const,
+    lastSession: "Feb 18, 2026",
+    nextSession: "Feb 27, 2026",
+    sessions: 10,
+  },
+]
+
+const upcomingSessions = [
+  { patient: "Alex M.", initials: "AM", time: "10:00 AM", date: "Today", type: "Follow-up" },
+  { patient: "Casey R.", initials: "CR", time: "2:30 PM", date: "Today", type: "Initial" },
+  { patient: "Jordan K.", initials: "JK", time: "9:00 AM", date: "Tomorrow", type: "Review" },
+  { patient: "Sam T.", initials: "ST", time: "11:30 AM", date: "Tomorrow", type: "Follow-up" },
+]
+
+function getTrendIcon(trend: "up" | "down" | "stable") {
+  if (trend === "up") return <TrendingUp className="h-4 w-4 text-destructive" />
+  if (trend === "down") return <TrendingDown className="h-4 w-4 text-green-600" />
+  return <Minus className="h-4 w-4 text-muted-foreground" />
+}
+
+function getScoreColor(score: number) {
+  if (score >= 70) return "text-destructive"
+  if (score >= 50) return "text-amber-600"
+  return "text-green-600"
+}
+
+export default function ProfessionalDashboard() {
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Patient Insights</h1>
+        <p className="text-muted-foreground mt-1">
+          Overview of your active patients, flagged alerts, and upcoming sessions.
+        </p>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                <Users className="h-5 w-5 text-foreground" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Active Patients</p>
+                <p className="text-2xl font-semibold">24</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Flagged Alerts</p>
+                <p className="text-2xl font-semibold">3</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                <CalendarDays className="h-5 w-5 text-foreground" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Sessions This Week</p>
+                <p className="text-2xl font-semibold">18</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                <FileText className="h-5 w-5 text-foreground" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">AI Summaries Ready</p>
+                <p className="text-2xl font-semibold">7</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Flagged Alerts */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                Flagged Patients
+              </CardTitle>
+              <CardDescription>Patients requiring immediate attention based on AI analysis</CardDescription>
+            </div>
+            <Badge variant="destructive">{flaggedPatients.length} alerts</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {flaggedPatients.map((patient) => (
+              <div
+                key={patient.name}
+                className="flex items-center justify-between rounded-lg border p-4"
+              >
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="text-xs bg-destructive/10 text-destructive">
+                      {patient.initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium">{patient.name}</p>
+                    <p className="text-xs text-muted-foreground">{patient.reason}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">Last: {patient.lastSession}</span>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/professional/patients">
+                      View
+                      <ArrowRight className="ml-1 h-3 w-3" />
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-5">
+        {/* Patient List */}
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Recent Patients</CardTitle>
+                <CardDescription>Stress scores and session activity</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/professional/patients">View All</Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {/* Table header */}
+              <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-medium text-muted-foreground">
+                <span className="col-span-4">Patient</span>
+                <span className="col-span-2 text-center">Stress</span>
+                <span className="col-span-2 text-center">Trend</span>
+                <span className="col-span-2 text-center">Sessions</span>
+                <span className="col-span-2 text-right">Next</span>
+              </div>
+              {recentPatients.map((patient) => (
+                <div
+                  key={patient.name}
+                  className="grid grid-cols-12 items-center gap-2 rounded-lg px-3 py-3 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="col-span-4 flex items-center gap-2">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="text-xs">{patient.initials}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-medium">{patient.name}</span>
+                  </div>
+                  <div className="col-span-2 text-center">
+                    <span className={`text-sm font-semibold ${getScoreColor(patient.stressScore)}`}>
+                      {patient.stressScore}
+                    </span>
+                  </div>
+                  <div className="col-span-2 flex justify-center">{getTrendIcon(patient.trend)}</div>
+                  <div className="col-span-2 text-center text-sm text-muted-foreground">
+                    {patient.sessions}
+                  </div>
+                  <div className="col-span-2 text-right text-xs text-muted-foreground">
+                    {patient.nextSession.replace(", 2026", "")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Sessions */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Upcoming Sessions</CardTitle>
+            <CardDescription>Your schedule for the next 48 hours</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {upcomingSessions.map((session, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <Avatar className="h-8 w-8 mt-0.5">
+                    <AvatarFallback className="text-xs">{session.initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{session.patient}</p>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {session.type}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {session.date} at {session.time}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}

@@ -11,13 +11,13 @@ if backend_src not in sys.path:
 from config.settings import settings
 from langchain_aws import ChatBedrock
 
-# Initialize AWS Bedrock using backend settings
+# Amazon Nova Micro — fastest Bedrock model (~2x faster than Lite)
+# Great for short conversational turns (2-3 sentences)
 llm = ChatBedrock(
-    model_id=settings.BEDROCK_MODEL_ID,
+    model_id="amazon.nova-micro-v1:0",
     model_kwargs={
-        "temperature": 0.7,
-        "max_tokens": 1000,
+        "temperature": 0.65,
+        "max_tokens": 600,   # Enough for 2-3 sentence replies; shorter = faster
     },
-    client=None, # Langchain AWS client will use environment vars or default session, which settings also load
     region_name=settings.AWS_REGION
 )
