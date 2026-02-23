@@ -109,7 +109,7 @@ class ChatService:
         if _is_simple_message(content):
             logger.info(f"⚡ Fast path: trivial message, skipping agent")
             ai_text = _quick_reply()
-            emotion_data = {"stress_score": 0, "emotions": {"primary_emotion": "neutral"}}
+            emotion_data = {"stress_score": 0, "emotions": {"primary_emotion": "neutral", "primary_score": 1.0}}
             return self._save_and_return(conv, conversation_id, content, ai_text, emotion_data)
         # ─────────────────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ class ChatService:
                 return result.to_dict()
             except Exception as e:
                 logger.warning(f"⚠️ Stress analysis failed: {e}")
-                return {"error": str(e)}
+                return {"error": str(e), "emotions": {"primary_emotion": "neutral", "primary_score": 0.0}}
 
         def _run_agent():
             # Build context header with best-effort stress (0 before emotion result)
@@ -150,8 +150,12 @@ class ChatService:
                 result = agent.invoke({"messages": chat_history})
                 ai_content = result["messages"][-1].content
                 if isinstance(ai_content, list):
-                    return "".join(b["text"] for b in ai_content if "text" in b)
-                return str(ai_content)
+                    text_content = "".join(b["text"] for b in ai_content if "text" in b)
+                else:
+                    text_content = str(ai_content)
+                # Remove <thinking> blocks using regex
+                text_content = re.sub(r'<thinking>.*?<\/thinking>', '', text_content, flags=re.DOTALL).strip()
+                return text_content
             except Exception as e:
                 logger.error(f"❌ Agent failed: {e}")
                 return "I'm having a bit of trouble right now. Please try again in a moment. 😔"
@@ -196,10 +200,17 @@ class ChatService:
         else:
             suggestion = None
 
+        frontend_emotion = None
+        if isinstance(emotion_data, dict) and "emotions" in emotion_data:
+            frontend_emotion = {
+                "dominant_emotion": emotion_data["emotions"].get("primary_emotion", "neutral"),
+                "confidence": emotion_data["emotions"].get("primary_score", 1.0)
+            }
+
         return {
             "user_message": user_msg,
             "ai_message": ai_msg,
-            "emotion": emotion_data,
+            "emotion": frontend_emotion,
             "suggestion": suggestion,
         }
 

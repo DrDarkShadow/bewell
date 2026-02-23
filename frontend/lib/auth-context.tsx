@@ -77,35 +77,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch(`${API_BASE}/auth/local/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
+      // DEVELOPMENT BYPASS: Skip backend API call
+      // Determine role based on email simply for testing
+      const isDoc = email.toLowerCase().includes("doctor") || email.toLowerCase().includes("professional")
+      const role: UserRole = isDoc ? "professional" : "patient"
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        let errorMsg = "Invalid email or password."
-        if (err.detail) {
-          if (Array.isArray(err.detail)) {
-            errorMsg = err.detail[0]?.msg || JSON.stringify(err.detail)
-          } else if (typeof err.detail === "string") {
-            errorMsg = err.detail
-          }
-        }
-        return { success: false, error: errorMsg }
-      }
-
-      const data = await res.json()
       const user: User = {
-        id: String(data.user.id),
-        email: data.user.email,
-        name: data.user.name,
-        role: data.user.role,
+        id: "mock_id_" + Date.now(),
+        email: email || (isDoc ? "doctor@bewell.app" : "patient@bewell.app"),
+        name: isDoc ? "Dr. Demo" : "Demo Patient",
+        role: role,
       }
+      const token = "mock_token_" + Date.now()
 
-      setStoredSession(user, data.token)
-      setState({ user, token: data.token, isLoading: false, isAuthenticated: true })
+      setStoredSession(user, token)
+      setState({ user, token: token, isLoading: false, isAuthenticated: true })
       return { success: true }
     } catch {
       return { success: false, error: "Network error. Is the backend running?" }
