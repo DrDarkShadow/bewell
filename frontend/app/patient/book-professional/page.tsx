@@ -50,7 +50,7 @@ export default function BookProfessionalPage() {
         if (activeRequestId && !acceptedDoctorId) {
             interval = setInterval(async () => {
                 try {
-                    const res = await fetch(`http://127.0.0.1:8000/api/v1/patient/escalate/request/${activeRequestId}/status`, {
+                    const res = await fetch(`/api/v1/patient/escalate/request/${activeRequestId}/status`, {
                         headers: { Authorization: `Bearer ${token}` }
                     })
                     if (res.ok) {
@@ -72,7 +72,7 @@ export default function BookProfessionalPage() {
     useEffect(() => {
         const fetchProfessionals = async () => {
             try {
-                const res = await fetch("http://127.0.0.1:8000/api/v1/patient/professionals", {
+                const res = await fetch("/api/v1/patient/professionals", {
                     headers: { Authorization: `Bearer ${token}` }
                 })
                 if (res.ok) {
@@ -103,19 +103,20 @@ export default function BookProfessionalPage() {
     }
 
     const submitInitialRequest = async () => {
-        if (!pendingDoctorId || !consentGiven) return
+        if (!pendingDoctorId) return
 
         setIsSubmitting(true)
         try {
-            const res = await fetch("http://127.0.0.1:8000/api/v1/patient/escalate/request", {
+            const res = await fetch("/api/v1/patient/escalate/request", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    doctor_ids: [parseInt(pendingDoctorId)],
-                    note: patientNote
+                    doctor_ids: [pendingDoctorId],
+                    note: patientNote,
+                    share_summary: consentGiven
                 })
             })
 
@@ -124,9 +125,14 @@ export default function BookProfessionalPage() {
                 setActiveRequestId(data.request_id)
                 setRequestedDoctorIds([pendingDoctorId])
                 setIsConsentOpen(false)
+            } else {
+                const errorData = await res.text()
+                console.error("Failed to submit request", res.status, errorData)
+                alert("Failed to send request: " + errorData)
             }
         } catch (err) {
-            console.error(err)
+            console.error("Fetch error:", err)
+            alert("Network Error: " + err)
         } finally {
             setIsSubmitting(false)
         }
@@ -139,14 +145,14 @@ export default function BookProfessionalPage() {
         setRequestedDoctorIds(prev => [...prev, doctorId])
 
         try {
-            await fetch(`http://127.0.0.1:8000/api/v1/patient/escalate/request/${activeRequestId}/add-doctor`, {
+            await fetch(`/api/v1/patient/escalate/request/${activeRequestId}/add-doctor`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    doctor_id: parseInt(doctorId)
+                    doctor_id: doctorId
                 })
             })
         } catch (err) {
@@ -321,7 +327,7 @@ export default function BookProfessionalPage() {
                         <Button variant="outline" onClick={() => setIsConsentOpen(false)}>Cancel</Button>
                         <Button
                             onClick={submitInitialRequest}
-                            disabled={!consentGiven || isSubmitting}
+                            disabled={isSubmitting}
                         >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Send Urgent Request

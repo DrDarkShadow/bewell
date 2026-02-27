@@ -20,84 +20,8 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 
-const flaggedPatients = [
-  {
-    name: "Alex M.",
-    initials: "AM",
-    reason: "Stress score spike: 42 → 78 in 48h",
-    severity: "high" as const,
-    lastSession: "2 days ago",
-  },
-  {
-    name: "Jordan K.",
-    initials: "JK",
-    reason: "Missed 2 consecutive check-ins",
-    severity: "medium" as const,
-    lastSession: "5 days ago",
-  },
-  {
-    name: "Sam T.",
-    initials: "ST",
-    reason: "Journal sentiment shift detected",
-    severity: "medium" as const,
-    lastSession: "1 day ago",
-  },
-]
-
-const recentPatients = [
-  {
-    name: "Alex M.",
-    initials: "AM",
-    stressScore: 78,
-    trend: "up" as const,
-    lastSession: "Feb 20, 2026",
-    nextSession: "Feb 24, 2026",
-    sessions: 12,
-  },
-  {
-    name: "Jordan K.",
-    initials: "JK",
-    stressScore: 45,
-    trend: "down" as const,
-    lastSession: "Feb 17, 2026",
-    nextSession: "Feb 25, 2026",
-    sessions: 8,
-  },
-  {
-    name: "Sam T.",
-    initials: "ST",
-    stressScore: 52,
-    trend: "stable" as const,
-    lastSession: "Feb 21, 2026",
-    nextSession: "Feb 28, 2026",
-    sessions: 15,
-  },
-  {
-    name: "Casey R.",
-    initials: "CR",
-    stressScore: 31,
-    trend: "down" as const,
-    lastSession: "Feb 19, 2026",
-    nextSession: "Feb 26, 2026",
-    sessions: 6,
-  },
-  {
-    name: "Morgan L.",
-    initials: "ML",
-    stressScore: 63,
-    trend: "up" as const,
-    lastSession: "Feb 18, 2026",
-    nextSession: "Feb 27, 2026",
-    sessions: 10,
-  },
-]
-
-const upcomingSessions = [
-  { patient: "Alex M.", initials: "AM", time: "10:00 AM", date: "Today", type: "Follow-up" },
-  { patient: "Casey R.", initials: "CR", time: "2:30 PM", date: "Today", type: "Initial" },
-  { patient: "Jordan K.", initials: "JK", time: "9:00 AM", date: "Tomorrow", type: "Review" },
-  { patient: "Sam T.", initials: "ST", time: "11:30 AM", date: "Tomorrow", type: "Follow-up" },
-]
+// We keep flaggedPatients empty until the DB actually supports finding real flags.
+const flaggedPatients: any[] = []
 
 function getTrendIcon(trend: "up" | "down" | "stable") {
   if (trend === "up") return <TrendingUp className="h-4 w-4 text-destructive" />
@@ -112,14 +36,22 @@ function getScoreColor(score: number) {
 }
 
 export default function ProfessionalDashboard() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const [urgentRequests, setUrgentRequests] = useState<any[]>([])
+  const [recentPatients, setRecentPatients] = useState<any[]>([])
+  const [upcomingSessions, setUpcomingSessions] = useState<any[]>([])
+  const [stats, setStats] = useState({
+    activePatientsCount: 0,
+    sessionsThisWeek: 0,
+    flaggedAlerts: 0,
+    aiSummariesReady: 0
+  })
 
   useEffect(() => {
     const fetchRequests = async () => {
       if (!token) return
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/v1/doctor/escalate/requests", {
+        const res = await fetch("/api/v1/doctor/escalate/requests", {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (res.ok) {
@@ -131,14 +63,56 @@ export default function ProfessionalDashboard() {
       }
     }
 
+    const fetchDashboard = async () => {
+      if (!token) return
+      try {
+        const res = await fetch("/api/v1/doctor/dashboard", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setRecentPatients(data.recentPatients || [])
+          setUpcomingSessions(data.upcomingSessions || [])
+          setStats({
+            activePatientsCount: data.activePatientsCount || 0,
+            sessionsThisWeek: data.sessionsThisWeek || 0,
+            flaggedAlerts: data.flaggedAlerts || 0,
+            aiSummariesReady: data.aiSummariesReady || 0
+          })
+        }
+      } catch (err) { }
+    }
+
     fetchRequests()
-    const interval = setInterval(fetchRequests, 5000)
-    return () => clearInterval(interval)
-  }, [token])
+    fetchDashboard()
+
+    // Fallback polling for requests just in case
+    const interval = setInterval(fetchRequests, 10000)
+
+    // Connect to WebSocket if we have the user info
+    let ws: WebSocket | null = null
+    if (user?.id) {
+      ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/ws/doctor/${user.id}`)
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'new_request') {
+            toast.error(`⚠️ URGENT REQUEST from ${data.patient_name}`)
+            fetchRequests() // re-fetch requests right away
+          }
+        } catch (e) { }
+      }
+    }
+
+    return () => {
+      clearInterval(interval)
+      if (ws) ws.close()
+    }
+  }, [token, user])
 
   const handleAcceptRequest = async (requestId: string) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/v1/doctor/escalate/request/${requestId}/accept`, {
+      const res = await fetch(`/api/v1/doctor/escalate/request/${requestId}/accept`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -218,7 +192,7 @@ export default function ProfessionalDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Active Patients</p>
-                <p className="text-2xl font-semibold">24</p>
+                <p className="text-2xl font-semibold">{stats.activePatientsCount}</p>
               </div>
             </div>
           </CardContent>
@@ -231,7 +205,7 @@ export default function ProfessionalDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Flagged Alerts</p>
-                <p className="text-2xl font-semibold">3</p>
+                <p className="text-2xl font-semibold">{stats.flaggedAlerts}</p>
               </div>
             </div>
           </CardContent>
@@ -244,7 +218,7 @@ export default function ProfessionalDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Sessions This Week</p>
-                <p className="text-2xl font-semibold">18</p>
+                <p className="text-2xl font-semibold">{stats.sessionsThisWeek}</p>
               </div>
             </div>
           </CardContent>
@@ -257,7 +231,7 @@ export default function ProfessionalDashboard() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">AI Summaries Ready</p>
-                <p className="text-2xl font-semibold">7</p>
+                <p className="text-2xl font-semibold">{stats.aiSummariesReady}</p>
               </div>
             </div>
           </CardContent>
@@ -265,51 +239,53 @@ export default function ProfessionalDashboard() {
       </div>
 
       {/* Flagged Alerts */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-                Flagged Patients
-              </CardTitle>
-              <CardDescription>Patients requiring immediate attention based on AI analysis</CardDescription>
+      {flaggedPatients.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                  Flagged Patients
+                </CardTitle>
+                <CardDescription>Patients requiring immediate attention based on AI analysis</CardDescription>
+              </div>
+              <Badge variant="destructive">{flaggedPatients.length} alerts</Badge>
             </div>
-            <Badge variant="destructive">{flaggedPatients.length} alerts</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {flaggedPatients.map((patient) => (
-              <div
-                key={patient.name}
-                className="flex items-center justify-between rounded-lg border p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback className="text-xs bg-destructive/10 text-destructive">
-                      {patient.initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-medium">{patient.name}</p>
-                    <p className="text-xs text-muted-foreground">{patient.reason}</p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {flaggedPatients.map((patient) => (
+                <div
+                  key={patient.name}
+                  className="flex items-center justify-between rounded-lg border p-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="text-xs bg-destructive/10 text-destructive">
+                        {patient.initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium">{patient.name}</p>
+                      <p className="text-xs text-muted-foreground">{patient.reason}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">Last: {patient.lastSession}</span>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/professional/patients">
+                        View
+                        <ArrowRight className="ml-1 h-3 w-3" />
+                      </Link>
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">Last: {patient.lastSession}</span>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href="/professional/patients">
-                      View
-                      <ArrowRight className="ml-1 h-3 w-3" />
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Patient List */}

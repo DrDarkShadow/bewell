@@ -4,6 +4,7 @@ from typing import List, Optional
 class EscalateRequestCreate(BaseModel):
     doctor_ids: List[int] = Field(..., description="List of professional IDs to send the request to")
     note: Optional[str] = Field(None, description="Optional note for the doctors")
+    share_summary: bool = Field(True, description="Whether the patient consents to sharing an AI summary of their recent chat")
 
 class AddDoctorRequest(BaseModel):
     doctor_id: int = Field(..., description="Professional ID to add to the existing request")
