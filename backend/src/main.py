@@ -10,7 +10,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress INFO/WARNING
 # Add src to path so relative imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from api.common import auth, chat, appointments, listening, activities
+from api.common import auth, chat, appointments, listening, activities, escalations
 
 # API Version Prefix
 API_V1_PREFIX = "/api/v1"
@@ -69,7 +69,7 @@ app.include_router(chat.router, prefix=f"{API_V1_PREFIX}")
 app.include_router(appointments.router, prefix=f"{API_V1_PREFIX}")
 app.include_router(listening.router, prefix=f"{API_V1_PREFIX}")
 app.include_router(activities.router, prefix=f"{API_V1_PREFIX}")
-
+app.include_router(escalations.router, prefix=f"{API_V1_PREFIX}")
 # Health check (Root)
 @app.get("/")
 def root():

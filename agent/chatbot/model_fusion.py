@@ -10,6 +10,14 @@ Fuses features from both models to calculate comprehensive stress score.
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass, field
 import warnings
+import os
+
+# Prevent PyTorch deadlocks on Windows CPU within ThreadPoolExecutor
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -146,7 +154,7 @@ class ModelManager:
             import torch
             ModelManager._torch = torch
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"🔧 Model Fusion: Using device: {self._device}")
+            print(f"[Config] Model Fusion: Using device: {self._device}")
             ModelManager._initialized = True
     
     @property
@@ -160,7 +168,7 @@ class ModelManager:
             from transformers import pipeline
             ModelManager._pipeline = pipeline
             
-            print(f"📥 Loading sentiment model: {SENTIMENT_MODEL}")
+            print(f"[Loading] Sentiment model: {SENTIMENT_MODEL}")
             self._sentiment_pipeline = pipeline(
                 "sentiment-analysis",
                 model=SENTIMENT_MODEL,
@@ -168,7 +176,7 @@ class ModelManager:
                 top_k=None,
                 device=0 if self._device == "cuda" else -1
             )
-            print("✅ Sentiment model loaded!")
+            print("[Success] Sentiment model loaded!")
         return self._sentiment_pipeline
     
     def load_emotion_model(self):
@@ -178,7 +186,7 @@ class ModelManager:
             from transformers import pipeline
             ModelManager._pipeline = pipeline
             
-            print(f"📥 Loading emotion model: {EMOTION_MODEL}")
+            print(f"[Loading] Emotion model: {EMOTION_MODEL}")
             self._emotion_pipeline = pipeline(
                 "text-classification",
                 model=EMOTION_MODEL,
@@ -186,7 +194,7 @@ class ModelManager:
                 top_k=None,  # Return all labels
                 device=0 if self._device == "cuda" else -1
             )
-            print("✅ Emotion model loaded!")
+            print("[Success] Emotion model loaded!")
         return self._emotion_pipeline
     
     def load_all_models(self):
@@ -237,7 +245,7 @@ class SentimentAnalyzer:
                 result.all_scores = all_scores
             
         except Exception as e:
-            print(f"⚠️ Sentiment analysis error: {e}")
+            print(f"[Error] Sentiment analysis error: {e}")
             result.label = "neutral"
             result.score = 1.0
             result.all_scores = {"negative": 0.0, "neutral": 1.0, "positive": 0.0}
@@ -302,7 +310,7 @@ class EmotionAnalyzer:
                     result.primary_score = top_emotions[0][1]
                 
         except Exception as e:
-            print(f"⚠️ Emotion analysis error: {e}")
+            print(f"[Error] Emotion analysis error: {e}")
             result.primary_emotion = "neutral"
             result.primary_score = 1.0
             result.all_emotions = {"neutral": 1.0}
@@ -333,9 +341,9 @@ class StressScoreCalculator:
     
     def initialize(self):
         """Pre-load all models"""
-        print("🚀 Initializing Model Fusion System...")
+        print("[Init] Initializing Model Fusion System...")
         self.model_manager.load_all_models()
-        print("✅ All models loaded and ready!")
+        print("[Success] All models loaded and ready!")
         return self
     
     def calculate_sentiment_stress(self, sentiment: SentimentResult) -> float:

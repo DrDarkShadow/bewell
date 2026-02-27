@@ -1,5 +1,8 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { useAuth } from "@/lib/auth-context"
+import { toast } from "sonner"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,6 +16,7 @@ import {
   CalendarDays,
   FileText,
   ArrowRight,
+  BellRing
 } from "lucide-react"
 import Link from "next/link"
 
@@ -108,8 +112,95 @@ function getScoreColor(score: number) {
 }
 
 export default function ProfessionalDashboard() {
+  const { token } = useAuth()
+  const [urgentRequests, setUrgentRequests] = useState<any[]>([])
+
+  useEffect(() => {
+    const fetchRequests = async () => {
+      if (!token) return
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/v1/doctor/escalate/requests", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setUrgentRequests(data)
+        }
+      } catch (err) {
+        console.error("Failed to fetch urgent requests", err)
+      }
+    }
+
+    fetchRequests()
+    const interval = setInterval(fetchRequests, 5000)
+    return () => clearInterval(interval)
+  }, [token])
+
+  const handleAcceptRequest = async (requestId: string) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/v1/doctor/escalate/request/${requestId}/accept`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        toast.success("Request accepted! A new appointment has been scheduled.")
+        setUrgentRequests(prev => prev.filter(r => r.request_id !== requestId))
+      } else {
+        toast.error("Failed to accept request or it was already taken.")
+        setUrgentRequests(prev => prev.filter(r => r.request_id !== requestId))
+      }
+    } catch (err) {
+      toast.error("An error occurred.")
+      console.error(err)
+    }
+  }
+
   return (
     <div className="space-y-8">
+      {/* Urgent Requests Banner */}
+      {urgentRequests.length > 0 && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          <h2 className="text-xl font-bold flex items-center gap-2 text-destructive">
+            <BellRing className="h-5 w-5 animate-bounce" />
+            Incoming Urgent Requests ({urgentRequests.length})
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {urgentRequests.map(req => (
+              <Card key={req.request_id} className="border-destructive/50 bg-destructive/5 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex justify-between items-start">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-destructive/20 text-destructive text-xs">
+                          {req.patient_name.split(' ').map((n: string) => n[0]).join('')}
+                        </AvatarFallback>
+                      </Avatar>
+                      {req.patient_name}
+                    </CardTitle>
+                    <Badge variant="destructive" className="animate-pulse">Urgent</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pb-4">
+                  <div className="text-sm bg-background/50 rounded-md p-3 border border-border/50">
+                    <p className="font-semibold text-xs text-muted-foreground mb-1">Patient Note:</p>
+                    <p className="line-clamp-3 italic">"{req.note || 'No additional note provided.'}"</p>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-3">
+                    Received: {new Date(req.created_at).toLocaleTimeString()}
+                  </p>
+                  <Button
+                    className="w-full mt-4 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                    onClick={() => handleAcceptRequest(req.request_id)}
+                  >
+                    Accept Request immediately
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Patient Insights</h1>
         <p className="text-muted-foreground mt-1">

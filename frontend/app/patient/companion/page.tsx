@@ -1,5 +1,7 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+
 import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -24,6 +26,7 @@ type EmotionData = {
 }
 
 export default function CompanionPage() {
+  const router = useRouter()
   const { token, isAuthenticated } = useAuth()
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -33,6 +36,14 @@ export default function CompanionPage() {
   const [input, setInput] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const overallState = emotionTimeline.length > 0 ? {
+    emotion: Object.entries(emotionTimeline.reduce((acc, curr) => {
+      acc[curr.emotion] = (acc[curr.emotion] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)).sort((a, b) => b[1] - a[1])[0][0],
+    score: Math.round(emotionTimeline.reduce((acc, curr) => acc + curr.intensity, 0) / emotionTimeline.length)
+  } : null;
 
   // Start chat session on mount
   useEffect(() => {
@@ -125,7 +136,7 @@ export default function CompanionPage() {
             time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             emotion: data.emotion.dominant_emotion,
             intensity: Math.round(data.emotion.confidence * 100)
-          }].slice(-10)) // keep last 10
+          }])
         }
 
         setMessages((prev) => [...prev, aiMsg])
@@ -174,8 +185,8 @@ export default function CompanionPage() {
               >
                 <div
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${msg.role === "ai"
-                      ? "bg-muted text-foreground"
-                      : "bg-foreground text-background"
+                    ? "bg-muted text-foreground"
+                    : "bg-foreground text-background"
                     }`}
                 >
                   {msg.role === "ai" ? (
@@ -189,8 +200,8 @@ export default function CompanionPage() {
                 >
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "ai"
-                        ? "bg-muted text-foreground rounded-tl-md"
-                        : "bg-foreground text-background rounded-tr-md"
+                      ? "bg-muted text-foreground rounded-tl-md"
+                      : "bg-foreground text-background rounded-tr-md"
                       }`}
                   >
                     {msg.content}
@@ -259,6 +270,31 @@ export default function CompanionPage() {
 
         <ScrollArea className="flex-1 p-6">
           <div className="space-y-6">
+            {/* Overall State */}
+            {overallState && (
+              <Card className="bg-muted/50 border-muted">
+                <CardContent className="p-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                    Overall State (Average)
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-semibold text-foreground capitalize">
+                      {overallState.emotion}
+                    </span>
+                    <Badge variant="outline" className="text-xs bg-background">
+                      {overallState.score} / 100
+                    </Badge>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-background overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-foreground/50 transition-all duration-500"
+                      style={{ width: `${overallState.score}%` }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Current State */}
             <Card>
               <CardContent className="p-4">
@@ -287,6 +323,27 @@ export default function CompanionPage() {
                 )}
               </CardContent>
             </Card>
+
+            {overallState && overallState.score > 90 && (
+              <Card className="border-destructive/50 bg-destructive/5">
+                <CardContent className="p-4">
+                  <p className="text-xs font-medium text-destructive mb-1">
+                    High Stress Detected
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                    Your stress levels seem consistently high. Consider speaking with a professional.
+                  </p>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={() => router.push("/patient/book-professional")}
+                  >
+                    Escalate to Therapist
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Emotion Timeline */}
             <div>
@@ -325,18 +382,20 @@ export default function CompanionPage() {
               </div>
             </div>
 
-            {/* Consent Banner */}
-            <Card className="border-dashed">
+            {/* Escalate to Therapist Permanent Button */}
+            <Card className="border-primary/20 bg-primary/5">
               <CardContent className="p-4">
-                <p className="text-xs font-medium text-foreground mb-1">
-                  Therapist Escalation
+                <p className="text-xs font-medium text-primary mb-1">
+                  Need Professional Support?
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed mb-3">
-                  If you would like to share this session with a therapist, you
-                  can grant consent at any time.
+                  You can securely share this session and connect with a human therapist at any time.
                 </p>
-                <Button variant="outline" size="sm" className="w-full text-xs">
-                  Share with Therapist
+                <Button
+                  onClick={() => router.push("/patient/book-professional")}
+                  className="w-full text-xs bg-primary hover:bg-primary/90 text-primary-foreground"
+                >
+                  Escalate to Therapist
                 </Button>
               </CardContent>
             </Card>

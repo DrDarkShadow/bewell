@@ -20,8 +20,12 @@ logger = logging.getLogger(__name__)
 # Ensure project root is on sys.path once at module load time
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_current_dir)))
-if _project_root not in sys.path:
-    sys.path.append(_project_root)
+# To avoid Uvicorn reloading when frontend changes, append the agent directory specifically
+_agent_dir = os.path.join(_project_root, "agent")
+if _agent_dir not in sys.path:
+    sys.path.append(_project_root)  # Note: Actually it needs project_root for `agent.chatbot...` imports but we can use reload-dir
+    # Wait, if we just remove this sys.path modification because we assume uvicorn is run correctly, it might break if the user runs it as-is.
+    # Instead, we will keep it but instruct the user to use `--reload-dir`. I will just keep the sys.path.append unchanged here but add traceback to error logging.
 
 # ── Pre-check gate ──────────────────────────────────────────────────────────
 # These patterns are trivial small-talk that don't need a full ReAct agent call.
@@ -133,19 +137,35 @@ class ChatService:
         def _run_emotion():
             try:
                 result = calculate_stress_score(content)
-                logger.info(f"🧠 Stress {result.stress_score:.0%} | Emotion: {result.emotions.primary_emotion}")
+                logger.info(f"[Stress] {result.stress_score:.0%} | Emotion: {result.emotions.primary_emotion}")
                 return result.to_dict()
             except Exception as e:
-                logger.warning(f"⚠️ Stress analysis failed: {e}")
+                logger.warning(f"[Warning] Stress analysis failed: {e}")
                 return {"error": str(e), "emotions": {"primary_emotion": "neutral", "primary_score": 0.0}}
 
         def _run_agent():
             # Build context header with best-effort stress (0 before emotion result)
             chat_history = [{"role": "system", "content": f"[SESSION CONTEXT: Turn #{turn_count}]"}]
+            
+            valid_history = []
             for m in previous_messages:
                 role = "user" if m.sender_type == "patient" else "assistant"
-                chat_history.append({"role": role, "content": m.content})
-            chat_history.append({"role": "user", "content": content})
+                
+                if not valid_history:
+                    if role == "user":
+                        valid_history.append({"role": role, "content": m.content})
+                else:
+                    if valid_history[-1]["role"] == role:
+                        valid_history[-1]["content"] += "\n" + m.content
+                    else:
+                        valid_history.append({"role": role, "content": m.content})
+            
+            if valid_history and valid_history[-1]["role"] == "user":
+                valid_history[-1]["content"] += "\n" + content
+                chat_history.extend(valid_history)
+            else:
+                chat_history.extend(valid_history)
+                chat_history.append({"role": "user", "content": content})
             try:
                 result = agent.invoke({"messages": chat_history})
                 ai_content = result["messages"][-1].content
@@ -157,8 +177,10 @@ class ChatService:
                 text_content = re.sub(r'<thinking>.*?<\/thinking>', '', text_content, flags=re.DOTALL).strip()
                 return text_content
             except Exception as e:
-                logger.error(f"❌ Agent failed: {e}")
-                return "I'm having a bit of trouble right now. Please try again in a moment. 😔"
+                import traceback
+                logger.error(f"[Error] Agent failed: {e}")
+                logger.error(traceback.format_exc())
+                return "I'm having a bit of trouble right now. Please try again in a moment."
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             emotion_future = pool.submit(_run_emotion)
@@ -166,7 +188,7 @@ class ChatService:
             emotion_data   = emotion_future.result()
             ai_text        = agent_future.result()
 
-        logger.info(f"✅ Agent responded: '{ai_text[:50]}...'")
+        logger.info(f"[Success] Agent responded: '{ai_text[:50]}...'")
 
         return self._save_and_return(conv, conversation_id, content, ai_text, emotion_data)
 
