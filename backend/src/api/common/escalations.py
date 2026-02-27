@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 from typing import List, Optional
 from datetime import datetime
 import json
@@ -16,6 +16,7 @@ if project_root not in sys.path:
 from config.database import get_db
 from api.dependencies import get_current_user, require_professional
 from models.user import User, UserRole
+from models.professional import ProfessionalProfile
 from models.appointment import AppointmentRequest, RequestReceiver, Appointment
 from models.conversation import Conversation, Message
 from schemas.escalation import EscalateRequestCreate, AddDoctorRequest, EscalationResponse, RequestStatusResponse
@@ -33,18 +34,27 @@ async def get_professionals(
     """
     Get a list of available professionals for the directory page.
     """
-    professionals = db.query(User).filter(User.role == UserRole.PROFESSIONAL, User.is_deleted == False).all()
+    query = text("""
+        SELECT u.id, u.name, u.email, p.specialization, p.consultation_fee, p.average_rating 
+        FROM users u 
+        LEFT JOIN professional_profiles p ON u.id = p.user_id 
+        WHERE u.role = 'PROFESSIONAL' AND u.is_deleted = false
+    """)
+    results = db.execute(query).fetchall()
     
-    return [{
-        "id": str(p.id),
-        "name": p.name,
-        "email": p.email,
-        # Mocking extra data since we don't have specialties/fees yet
-        "specialty": "Therapist",
-        "fee": 150,
-        "rating": 4.8,
-        "next_available": "Today"
-    } for p in professionals]
+    professionals = []
+    for row in results:
+        professionals.append({
+            "id": str(row.id),
+            "name": row.name,
+            "email": row.email,
+            "specialty": row.specialization if row.specialization else "Therapist",
+            "fee": float(row.consultation_fee) if row.consultation_fee else 150.0,
+            "rating": float(row.average_rating) if row.average_rating else 4.8,
+            "next_available": "Today"
+        })
+        
+    return professionals
 
 
 # --- 2. Create Escalation Request (Centralized) ---

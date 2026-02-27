@@ -48,7 +48,11 @@ class ProfessionalProfile(Base):
 
     # Relationships
     user = relationship("User", backref="professional_profile")
-    reviews = relationship("ProfessionalReview", back_populates="professional")
+    reviews = relationship(
+        "ProfessionalReview", 
+        back_populates="professional_profile",
+        primaryjoin="ProfessionalProfile.user_id == foreign(ProfessionalReview.professional_id)"
+    )
 
     # Indexes (defined via __table_args__ for complex indexes)
     __table_args__ = (
@@ -75,8 +79,18 @@ class ProfessionalReview(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     # Relationships
-    professional = relationship("ProfessionalProfile", back_populates="reviews", foreign_keys=[professional_id], primaryjoin="ProfessionalProfile.user_id == ProfessionalReview.professional_id")
-
+    professional_profile = relationship(
+        "ProfessionalProfile", 
+        back_populates="reviews", 
+        primaryjoin="ProfessionalProfile.user_id == ProfessionalReview.professional_id",
+        foreign_keys="[ProfessionalReview.professional_id]"
+    )
+    
+    patient = relationship(
+        "User",
+        foreign_keys=[patient_id],
+        primaryjoin="User.id == ProfessionalReview.patient_id"
+    )
     __table_args__ = (
         Index('idx_review_professional', 'professional_id', 'created_at'),
         Index('idx_review_rating', 'professional_id', 'rating'),

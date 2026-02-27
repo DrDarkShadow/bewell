@@ -21,6 +21,8 @@ def get_current_user(
     try:
         payload = decode_token(token)
         return payload  # {"sub": "123", "role": "patient", ...}
+    except HTTPException as e:
+        raise e
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

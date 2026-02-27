@@ -45,11 +45,39 @@ export default function CompanionPage() {
     score: Math.round(emotionTimeline.reduce((acc, curr) => acc + curr.intensity, 0) / emotionTimeline.length)
   } : null;
 
-  // Start chat session on mount
+  // Start or resume chat session on mount
   useEffect(() => {
     if (!isAuthenticated || !token) return
 
-    const startSession = async () => {
+    const startOrResumeSession = async () => {
+      const existingConvId = sessionStorage.getItem("activeConversationId")
+
+      if (existingConvId) {
+        setConversationId(existingConvId)
+        try {
+          // Fetch existing history
+          const res = await fetch(`/api/v1/patient/chat/${existingConvId}/history`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+          if (res.ok) {
+            const data = await res.json()
+            if (data.messages && data.messages.length > 0) {
+              setMessages(data.messages.map((m: any) => ({
+                id: m.id,
+                role: m.sender === "patient" ? "user" : "ai",
+                content: m.content,
+                timestamp: m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+                emotion: m.emotion_score?.emotions?.primary_emotion || undefined
+              })))
+              return // Successfully resumed
+            }
+          }
+        } catch (err) {
+          console.error("Failed to fetch chat history", err)
+        }
+      }
+
+      // Start new session if no existing one or fetch failed
       try {
         const res = await fetch("/api/v1/patient/chat/start", {
           method: "POST",
@@ -61,6 +89,7 @@ export default function CompanionPage() {
         if (res.ok) {
           const data = await res.json()
           setConversationId(data.conversation_id)
+          sessionStorage.setItem("activeConversationId", data.conversation_id)
           setMessages([
             {
               id: "welcome",
@@ -75,7 +104,7 @@ export default function CompanionPage() {
       }
     }
 
-    startSession()
+    startOrResumeSession()
   }, [isAuthenticated, token])
 
   // Auto-scroll to bottom when messages change
