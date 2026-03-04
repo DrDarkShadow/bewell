@@ -33,7 +33,8 @@ interface AuthContextValue extends AuthState {
 }
 
 const AUTH_STORAGE_KEY = "bewell_session"
-const API_BASE = "/api/v1"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE = `${API_BASE_URL}/api/v1`
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
@@ -77,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const res = await fetch(`${API_BASE}/auth/local/login`, {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -115,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signup = useCallback(
     async (name: string, email: string, password: string, role: UserRole): Promise<{ success: boolean; error?: string }> => {
       try {
-        const res = await fetch(`${API_BASE}/auth/local/signup`, {
+        const res = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, email, password, role }),
