@@ -1,10 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import {
   BarChart3,
@@ -16,10 +15,9 @@ import {
   Home,
   Menu,
   LogOut,
-  Settings,
   X,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import AuthGuard from "@/components/auth-guard"
 import { useAuth } from "@/lib/auth-context"
 
@@ -38,15 +36,34 @@ export default function PatientLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
   const { user, logout } = useAuth()
+
+  // Memoize user initials to prevent recalculation
+  const userInitial = useMemo(() => user?.name?.charAt(0) || "U", [user?.name])
+
+  // Prefetch all routes on mount for instant navigation (client-side only)
+  useEffect(() => {
+    sidebarItems.forEach(item => {
+      router.prefetch(item.href)
+    })
+  }, [router])
+
+  const handleLogout = useCallback(() => {
+    logout()
+  }, [logout])
+
+  const closeMobileMenu = useCallback(() => {
+    setMobileOpen(false)
+  }, [])
 
   return (
     <AuthGuard requiredRole="patient">
       <div className="flex h-screen bg-background overflow-hidden">
         {/* Desktop Sidebar */}
-        <aside className="hidden md:flex w-64 flex-col border-r border-border bg-card">
-          <div className="flex h-14 items-center gap-2.5 border-b border-border px-6">
+        <aside className="hidden md:flex w-64 flex-col border-r border-border bg-card flex-shrink-0">
+          <div className="flex h-14 items-center gap-2.5 border-b border-border px-6 flex-shrink-0">
             <div className="relative w-7 h-7 rounded-md bg-foreground flex items-center justify-center">
               <svg
                 viewBox="0 0 24 24"
@@ -75,16 +92,16 @@ export default function PatientLayout({
             </span>
           </div>
 
-          <ScrollArea className="flex-1 py-4">
+          <div className="flex-1 overflow-y-auto py-4">
             <nav className="flex flex-col gap-1 px-3">
               {sidebarItems.map((item) => {
                 const isActive = pathname === item.href
                 return (
                   <Link
-                    key={item.name}
+                    key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
                       isActive
                         ? "bg-muted text-foreground"
                         : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -96,13 +113,13 @@ export default function PatientLayout({
                 )
               })}
             </nav>
-          </ScrollArea>
+          </div>
 
-          <div className="border-t border-border p-3 flex flex-col gap-1">
+          <div className="border-t border-border p-3 flex flex-col gap-1 flex-shrink-0">
             {user && (
               <div className="flex items-center gap-3 px-3 py-2 mb-1">
                 <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium text-foreground">
-                  {user.name.charAt(0)}
+                  {userInitial}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{user.name}</p>
@@ -112,14 +129,14 @@ export default function PatientLayout({
             )}
             <Link
               href="/"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-all duration-150"
             >
               <Home className="h-4 w-4" />
               Back to Home
             </Link>
             <button
-              onClick={logout}
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors w-full text-left"
+              onClick={handleLogout}
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-all duration-150 w-full text-left"
             >
               <LogOut className="h-4 w-4" />
               Sign out
@@ -128,8 +145,8 @@ export default function PatientLayout({
         </aside>
 
         {/* Mobile Header + Content */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <header className="md:hidden flex h-14 items-center justify-between border-b border-border px-4 bg-card">
+        <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+          <header className="md:hidden flex h-14 items-center justify-between border-b border-border px-4 bg-card flex-shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="relative w-7 h-7 rounded-md bg-foreground flex items-center justify-center">
                 <svg
@@ -172,7 +189,7 @@ export default function PatientLayout({
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => setMobileOpen(false)}
+                    onClick={closeMobileMenu}
                   >
                     <X className="h-4 w-4" />
                   </Button>
@@ -182,11 +199,11 @@ export default function PatientLayout({
                     const isActive = pathname === item.href
                     return (
                       <Link
-                        key={item.name}
+                        key={item.href}
                         href={item.href}
-                        onClick={() => setMobileOpen(false)}
+                        onClick={closeMobileMenu}
                         className={cn(
-                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
                           isActive
                             ? "bg-muted text-foreground"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -201,8 +218,8 @@ export default function PatientLayout({
                 <div className="border-t border-border p-3 mt-auto">
                   <Link
                     href="/"
-                    onClick={() => setMobileOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+                    onClick={closeMobileMenu}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-all duration-150"
                   >
                     <Home className="h-4 w-4" />
                     Back to Home

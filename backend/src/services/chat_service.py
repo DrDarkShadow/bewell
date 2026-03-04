@@ -20,12 +20,36 @@ logger = logging.getLogger(__name__)
 # Ensure project root is on sys.path once at module load time
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_current_dir)))
-# To avoid Uvicorn reloading when frontend changes, append the agent directory specifically
 _agent_dir = os.path.join(_project_root, "agent")
 if _agent_dir not in sys.path:
-    sys.path.append(_project_root)  # Note: Actually it needs project_root for `agent.chatbot...` imports but we can use reload-dir
-    # Wait, if we just remove this sys.path modification because we assume uvicorn is run correctly, it might break if the user runs it as-is.
-    # Instead, we will keep it but instruct the user to use `--reload-dir`. I will just keep the sys.path.append unchanged here but add traceback to error logging.
+    sys.path.append(_project_root)
+
+# ── Pre-initialize agent to avoid cold start ────────────────────────────────
+_agent = None
+_agent_initialized = False
+
+def _get_agent():
+    """Lazy-load and cache the agent to avoid cold starts"""
+    global _agent, _agent_initialized
+    if not _agent_initialized:
+        try:
+            logger.info("🔥 Initializing AI agent (one-time setup)...")
+            from agent.chatbot.agent import agent
+            _agent = agent
+            _agent_initialized = True
+            logger.info("✅ AI agent ready!")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize agent: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            _agent_initialized = True  # Mark as attempted to avoid retry loops
+    return _agent
+
+# Pre-warm the agent on module load
+try:
+    _get_agent()
+except Exception as e:
+    logger.warning(f"⚠️ Agent pre-warming failed (will retry on first message): {e}")
 
 # ── Pre-check gate ──────────────────────────────────────────────────────────
 # These patterns are trivial small-talk that don't need a full ReAct agent call.
@@ -105,6 +129,7 @@ class ChatService:
         Optimizations:
           - Pre-check gate: trivial greetings skip Bedrock entirely
           - Parallel execution: emotion scoring + agent run concurrently
+          - Agent pre-warming: agent is initialized once on server startup
         """
         # 1. Verify ownership
         conv = self._get_conversation(conversation_id, user_id)
@@ -129,7 +154,6 @@ class ChatService:
 
         # 3. PARALLEL: run emotion scoring + agent call concurrently
         from agent.chatbot.model_fusion import calculate_stress_score
-        from agent.chatbot.agent import agent
 
         emotion_data = {}
         ai_text = ""
@@ -144,6 +168,12 @@ class ChatService:
                 return {"error": str(e), "emotions": {"primary_emotion": "neutral", "primary_score": 0.0}}
 
         def _run_agent():
+            # Get pre-warmed agent
+            agent = _get_agent()
+            if not agent:
+                logger.error("[Error] Agent not available")
+                return "I'm having trouble connecting right now. Please try again in a moment."
+            
             # Build context header with best-effort stress (0 before emotion result)
             chat_history = [{"role": "system", "content": f"[SESSION CONTEXT: Turn #{turn_count}]"}]
             
@@ -166,7 +196,9 @@ class ChatService:
             else:
                 chat_history.extend(valid_history)
                 chat_history.append({"role": "user", "content": content})
+            
             try:
+                logger.info(f"[Agent] Processing message: '{content[:50]}...'")
                 result = agent.invoke({"messages": chat_history})
                 ai_content = result["messages"][-1].content
                 if isinstance(ai_content, list):
@@ -177,6 +209,7 @@ class ChatService:
                 text_content = re.sub(r'<thinking>.*?<\/thinking>', '', text_content, flags=re.DOTALL).strip()
                 # Also strip any stray <response> tags the model might output
                 text_content = re.sub(r'<\/?response>', '', text_content, flags=re.IGNORECASE).strip()
+                logger.info(f"[Agent] Response generated: '{text_content[:50]}...'")
                 return text_content
             except Exception as e:
                 import traceback

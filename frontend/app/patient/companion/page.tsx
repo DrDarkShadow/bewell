@@ -35,6 +35,7 @@ export default function CompanionPage() {
 
   const [input, setInput] = useState("")
   const [isTyping, setIsTyping] = useState(false)
+  const [isReady, setIsReady] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const overallState = emotionTimeline.length > 0 ? {
@@ -44,6 +45,41 @@ export default function CompanionPage() {
     }, {} as Record<string, number>)).sort((a, b) => b[1] - a[1])[0][0],
     score: Math.round(emotionTimeline.reduce((acc, curr) => acc + curr.intensity, 0) / emotionTimeline.length)
   } : null;
+
+  // Load persisted emotion data from sessionStorage
+  useEffect(() => {
+    const savedEmotionTimeline = sessionStorage.getItem("emotionTimeline")
+    const savedCurrentEmotion = sessionStorage.getItem("currentEmotion")
+    
+    if (savedEmotionTimeline) {
+      try {
+        setEmotionTimeline(JSON.parse(savedEmotionTimeline))
+      } catch (e) {
+        console.error("Failed to parse emotion timeline", e)
+      }
+    }
+    
+    if (savedCurrentEmotion) {
+      try {
+        setCurrentEmotion(JSON.parse(savedCurrentEmotion))
+      } catch (e) {
+        console.error("Failed to parse current emotion", e)
+      }
+    }
+  }, [])
+
+  // Persist emotion data to sessionStorage whenever it changes
+  useEffect(() => {
+    if (emotionTimeline.length > 0) {
+      sessionStorage.setItem("emotionTimeline", JSON.stringify(emotionTimeline))
+    }
+  }, [emotionTimeline])
+
+  useEffect(() => {
+    if (currentEmotion) {
+      sessionStorage.setItem("currentEmotion", JSON.stringify(currentEmotion))
+    }
+  }, [currentEmotion])
 
   // Start or resume chat session on mount
   useEffect(() => {
@@ -69,6 +105,7 @@ export default function CompanionPage() {
                 timestamp: m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
                 emotion: m.emotion_score?.emotions?.primary_emotion || undefined
               })))
+              setIsReady(true)
               return // Successfully resumed
             }
           } else if (res.status === 401) {
@@ -101,6 +138,7 @@ export default function CompanionPage() {
               timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             }
           ])
+          setIsReady(true)
         } else if (res.status === 401) {
           logout()
           return
@@ -162,16 +200,18 @@ export default function CompanionPage() {
             m.id === userMsg.id ? { ...m, emotion: data.emotion.dominant_emotion } : m
           ))
 
-          setCurrentEmotion({
+          const newEmotion = {
             emotion: data.emotion.dominant_emotion,
             score: Math.round(data.emotion.confidence * 100)
-          })
+          }
+          setCurrentEmotion(newEmotion)
 
-          setEmotionTimeline(prev => [...prev, {
+          const newTimelineEntry = {
             time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             emotion: data.emotion.dominant_emotion,
             intensity: Math.round(data.emotion.confidence * 100)
-          }])
+          }
+          setEmotionTimeline(prev => [...prev, newTimelineEntry])
         }
 
         setMessages((prev) => [...prev, aiMsg])
@@ -194,10 +234,10 @@ export default function CompanionPage() {
   if (!isAuthenticated) return null
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] md:h-screen">
+    <div className="flex h-full overflow-hidden">
       {/* Chat Area */}
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+      <div className="flex flex-1 flex-col min-w-0">
+        <div className="flex-shrink-0 flex items-center justify-between border-b border-border px-6 py-4">
           <div>
             <h1 className="text-lg font-semibold text-foreground">
               AI Companion
@@ -207,11 +247,11 @@ export default function CompanionPage() {
             </p>
           </div>
           <Badge variant="outline" className="text-xs bg-green-500/10 text-green-500 hover:bg-green-500/20 border-green-500/20">
-            {conversationId ? "Session Active" : "Connecting..."}
+            Ready
           </Badge>
         </div>
 
-        <ScrollArea className="flex-1 px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           <div className="max-w-2xl mx-auto space-y-4 pb-4">
             {messages.map((msg) => (
               <div
@@ -272,19 +312,19 @@ export default function CompanionPage() {
             )}
             <div ref={scrollRef} />
           </div>
-        </ScrollArea>
+        </div>
 
-        <div className="border-t border-border px-6 py-4">
+        <div className="flex-shrink-0 border-t border-border px-6 py-4">
           <div className="max-w-2xl mx-auto flex gap-3">
             <Input
               placeholder="Type your message..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               className="flex-1"
-              disabled={!conversationId || isTyping}
+              disabled={!isReady || isTyping}
             />
-            <Button size="icon" onClick={handleSend} disabled={!input.trim() || !conversationId || isTyping}>
+            <Button size="icon" onClick={handleSend} disabled={!input.trim() || !isReady || isTyping}>
               <Send className="h-4 w-4" />
               <span className="sr-only">Send message</span>
             </Button>
@@ -293,8 +333,8 @@ export default function CompanionPage() {
       </div>
 
       {/* Emotion Analysis Panel (Desktop Only) */}
-      <aside className="hidden lg:flex w-80 flex-col border-l border-border bg-card">
-        <div className="border-b border-border px-6 py-4">
+      <aside className="hidden lg:flex w-80 flex-col border-l border-border bg-card flex-shrink-0">
+        <div className="flex-shrink-0 border-b border-border px-6 py-4">
           <h2 className="text-sm font-semibold text-foreground">
             Live Emotion Analysis
           </h2>
@@ -303,7 +343,7 @@ export default function CompanionPage() {
           </p>
         </div>
 
-        <ScrollArea className="flex-1 p-6">
+        <div className="flex-1 overflow-y-auto p-6">
           <div className="space-y-6">
             {/* Overall State */}
             {overallState && (
@@ -435,7 +475,7 @@ export default function CompanionPage() {
               </CardContent>
             </Card>
           </div>
-        </ScrollArea>
+        </div>
       </aside>
     </div>
   )
