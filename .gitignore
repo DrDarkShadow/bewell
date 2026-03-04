@@ -1,21 +1,64 @@
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 
 # Virtual environment
 .venv/
 venv/
 env/
+ENV/
 
 # Environment variables
 .env
+.env.local
+.env.*.local
 
 # Node.js dependencies
 node_modules/
 frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel/
 
-# Other
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Database
 *.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Model cache (HuggingFace)
+.cache/
+models/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Agent folders
 .agent/
+.gemini/
+.qoder/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
 .gemini/
