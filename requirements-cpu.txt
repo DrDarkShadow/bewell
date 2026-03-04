@@ -26,6 +26,7 @@ langgraph==1.0.9
 # Machine Learning & Audio Processing (CPU-only versions)
 torch==2.10.0  # Will install CPU version automatically
 transformers==5.1.0
+openai-whisper==20250625
 pydub==0.25.1
 websockets==12.0
 wsproto==1.2.0
@@ -37,6 +38,5 @@ scipy
 httpx
 
 # Note: Removed heavy packages not needed for production:
-# - openai-whisper (use transformers whisper instead)
-# - av, sounddevice (not needed for API)
+# - av, sounddevice (not needed for API, only for local audio recording)
 # - streamlit (only for UI, not needed for API)
