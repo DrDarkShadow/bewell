@@ -175,6 +175,8 @@ class ChatService:
                     text_content = str(ai_content)
                 # Remove <thinking> blocks using regex
                 text_content = re.sub(r'<thinking>.*?<\/thinking>', '', text_content, flags=re.DOTALL).strip()
+                # Also strip any stray <response> tags the model might output
+                text_content = re.sub(r'<\/?response>', '', text_content, flags=re.IGNORECASE).strip()
                 return text_content
             except Exception as e:
                 import traceback
@@ -226,7 +228,7 @@ class ChatService:
         if isinstance(emotion_data, dict) and "emotions" in emotion_data:
             frontend_emotion = {
                 "dominant_emotion": emotion_data["emotions"].get("primary_emotion", "neutral"),
-                "confidence": emotion_data["emotions"].get("primary_score", 1.0)
+                "confidence": emotion_data.get("stress_score", 0.0)
             }
 
         return {

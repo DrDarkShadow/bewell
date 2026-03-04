@@ -458,11 +458,23 @@ class StressScoreCalculator:
         result.stress_emotions_detected = stress_emotions
         result.calming_emotions_detected = calming_emotions
         
-        # Step 5: Fuse features (weighted combination)
-        result.stress_score = (
+        # Step 5: Fuse features (weighted combination + extreme anchor)
+        weighted_avg = (
             self.SENTIMENT_WEIGHT * result.sentiment_contribution +
             self.EMOTION_WEIGHT * result.emotion_contribution
         )
+        
+        max_signal = max(result.sentiment_contribution, result.emotion_contribution)
+        
+        # If the strongest signal (e.g. 100% negative sentiment or 90% fear) is high,
+        # it should exponentially dominate over the average.
+        if max_signal > 0.5:
+            # Curve the blend factor so that severe signals push exactly to 1.0
+            blend_factor = min(1.0, (max_signal - 0.5) * 2.5) 
+        else:
+            blend_factor = max_signal
+            
+        result.stress_score = (weighted_avg * (1 - blend_factor)) + (max_signal * blend_factor)
         
         # Ensure score is in valid range
         result.stress_score = max(0.0, min(1.0, result.stress_score))

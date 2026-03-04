@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import bcrypt
 import jwt
 from config.settings import settings
+from fastapi import HTTPException, status
 # pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")  # Removed due to version conflict
 
 def hash_password(password: str) -> str:

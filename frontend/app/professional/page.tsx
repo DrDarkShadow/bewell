@@ -16,7 +16,8 @@ import {
   CalendarDays,
   FileText,
   ArrowRight,
-  BellRing
+  BellRing,
+  Loader2
 } from "lucide-react"
 import Link from "next/link"
 
@@ -40,6 +41,7 @@ export default function ProfessionalDashboard() {
   const [urgentRequests, setUrgentRequests] = useState<any[]>([])
   const [recentPatients, setRecentPatients] = useState<any[]>([])
   const [upcomingSessions, setUpcomingSessions] = useState<any[]>([])
+  const [loadingAction, setLoadingAction] = useState<{ id: string; type: 'accept' | 'reject' } | null>(null)
   const [stats, setStats] = useState({
     activePatientsCount: 0,
     sessionsThisWeek: 0,
@@ -86,31 +88,56 @@ export default function ProfessionalDashboard() {
     fetchRequests()
     fetchDashboard()
 
-    // Fallback polling for requests just in case
-    const interval = setInterval(fetchRequests, 10000)
+    // WebSocket for real-time urgent request updates
+    const userId = user?.id
+    if (!userId) return
 
-    // Connect to WebSocket if we have the user info
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const wsUrl = `${wsProtocol}://127.0.0.1:8000/api/v1/ws/doctor/${userId}`
     let ws: WebSocket | null = null
-    if (user?.id) {
-      ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/ws/doctor/${user.id}`)
+    let reconnectTimeout: NodeJS.Timeout | null = null
+
+    const connectWs = () => {
+      ws = new WebSocket(wsUrl)
+
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'new_request') {
-            toast.error(`⚠️ URGENT REQUEST from ${data.patient_name}`)
-            fetchRequests() // re-fetch requests right away
+          const msg = JSON.parse(event.data)
+          console.log('[Doctor WS] Received message:', msg)
+          if (msg.type === 'new_request') {
+            setUrgentRequests(prev => {
+              if (prev.some(r => r.request_id === msg.request_id)) return prev
+              return [msg, ...prev]
+            })
+          } else if (msg.type === 'request_fulfilled') {
+            console.log('[Doctor WS] Removing request:', msg.request_id)
+            setUrgentRequests(prev => prev.filter(r => r.request_id !== msg.request_id))
           }
-        } catch (e) { }
+        } catch (err) {
+          console.error('[Doctor WS] Error parsing message:', err)
+        }
+      }
+
+      ws.onclose = () => {
+        reconnectTimeout = setTimeout(connectWs, 3000)
+      }
+
+      ws.onerror = () => {
+        ws?.close()
       }
     }
 
+    connectWs()
+
     return () => {
-      clearInterval(interval)
-      if (ws) ws.close()
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      ws?.close()
     }
   }, [token, user])
 
   const handleAcceptRequest = async (requestId: string) => {
+    setLoadingAction({ id: requestId, type: 'accept' })
+    const requestDetails = urgentRequests.find(r => r.request_id === requestId)
     try {
       const res = await fetch(`/api/v1/doctor/escalate/request/${requestId}/accept`, {
         method: "POST",
@@ -119,13 +146,80 @@ export default function ProfessionalDashboard() {
       if (res.ok) {
         toast.success("Request accepted! A new appointment has been scheduled.")
         setUrgentRequests(prev => prev.filter(r => r.request_id !== requestId))
+
+        // Optimistic UI update
+        if (requestDetails) {
+          setRecentPatients(prev => {
+            // Only add if not already in the list to prevent duplicates
+            if (prev.some(p => p.name === requestDetails.patient_name)) return prev
+
+            const initials = requestDetails.patient_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()
+            return [{
+              name: requestDetails.patient_name,
+              initials: initials,
+              lastSession: "N/A",
+              sessions: 0,
+              stressScore: 50,
+              trend: "stable",
+              nextSession: "Tomorrow" // Since backend schedules for tomorrow
+            }, ...prev].slice(0, 10) // Keep max 10
+          })
+
+          setStats(prev => ({
+            ...prev,
+            activePatientsCount: prev.activePatientsCount + 1,
+            sessionsThisWeek: prev.sessionsThisWeek + 1
+          }))
+        }
+
+        // Refresh dashboard from backend to get perfect truth
+        const dashRes = await fetch("/api/v1/doctor/dashboard", {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (dashRes.ok) {
+          const data = await dashRes.json()
+          setRecentPatients(data.recentPatients || [])
+          setUpcomingSessions(data.upcomingSessions || [])
+          setStats({
+            activePatientsCount: data.activePatientsCount || 0,
+            sessionsThisWeek: data.sessionsThisWeek || 0,
+            flaggedAlerts: data.flaggedAlerts || 0,
+            aiSummariesReady: data.aiSummariesReady || 0
+          })
+        }
       } else {
-        toast.error("Failed to accept request or it was already taken.")
+        const errorText = await res.text()
+        console.error('[Doctor] Accept failed:', res.status, errorText)
+        toast.error(`Failed to accept request: ${errorText || 'Server error'}`)
         setUrgentRequests(prev => prev.filter(r => r.request_id !== requestId))
+      }
+    } catch (err) {
+      console.error('[Doctor] Accept error:', err)
+      toast.error("An error occurred.")
+      console.error(err)
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const handleRejectRequest = async (requestId: string) => {
+    setLoadingAction({ id: requestId, type: 'reject' })
+    try {
+      const res = await fetch(`/api/v1/doctor/escalate/request/${requestId}/reject`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        toast.success("Request dismissed.")
+        setUrgentRequests(prev => prev.filter(r => r.request_id !== requestId))
+      } else {
+        toast.error("Failed to dismiss request.")
       }
     } catch (err) {
       toast.error("An error occurred.")
       console.error(err)
+    } finally {
+      setLoadingAction(null)
     }
   }
 
@@ -162,12 +256,31 @@ export default function ProfessionalDashboard() {
                   <p className="text-[10px] text-muted-foreground mt-3">
                     Received: {new Date(req.created_at).toLocaleTimeString()}
                   </p>
-                  <Button
-                    className="w-full mt-4 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-                    onClick={() => handleAcceptRequest(req.request_id)}
-                  >
-                    Accept Request immediately
-                  </Button>
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      variant="outline"
+                      className="w-1/2 border-destructive text-destructive hover:bg-destructive/10"
+                      onClick={() => handleRejectRequest(req.request_id)}
+                      disabled={loadingAction?.id === req.request_id}
+                    >
+                      {loadingAction?.id === req.request_id && loadingAction?.type === 'reject' ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Reject"
+                      )}
+                    </Button>
+                    <Button
+                      className="w-1/2 bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                      onClick={() => handleAcceptRequest(req.request_id)}
+                      disabled={loadingAction?.id === req.request_id}
+                    >
+                      {loadingAction?.id === req.request_id && loadingAction?.type === 'accept' ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Accept"
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}

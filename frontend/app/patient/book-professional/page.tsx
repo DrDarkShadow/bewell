@@ -32,6 +32,7 @@ export default function BookProfessionalPage() {
     const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
     const [requestedDoctorIds, setRequestedDoctorIds] = useState<string[]>([])
     const [acceptedDoctorId, setAcceptedDoctorId] = useState<string | null>(null)
+    const [selectedInfoDoctor, setSelectedInfoDoctor] = useState<Professional | null>(null)
 
     // Consent Dialog State
     const [isConsentOpen, setIsConsentOpen] = useState(false)
@@ -42,6 +43,7 @@ export default function BookProfessionalPage() {
 
     // Filter States
     const [searchQuery, setSearchQuery] = useState("")
+    const [withdrawingDoctorIds, setWithdrawingDoctorIds] = useState<string[]>([])
 
     // Polling Status Interval
     useEffect(() => {
@@ -50,24 +52,118 @@ export default function BookProfessionalPage() {
         if (activeRequestId && !acceptedDoctorId) {
             interval = setInterval(async () => {
                 try {
+                    console.log('[Patient Polling] Checking status for request:', activeRequestId)
                     const res = await fetch(`/api/v1/patient/escalate/request/${activeRequestId}/status`, {
                         headers: { Authorization: `Bearer ${token}` }
                     })
                     if (res.ok) {
                         const data = await res.json()
+                        console.log('[Patient Polling] Status response:', data)
                         if (data.status === "fulfilled" && data.accepted_by) {
+                            console.log('[Patient Polling] Request fulfilled by:', data.accepted_by)
                             setAcceptedDoctorId(data.accepted_by)
+                            setActiveRequestId(null)
+                            setRequestedDoctorIds([])
+                            clearInterval(interval)
+                        } else if (data.status === "cancelled" || data.status === "expired") {
+                            console.log('[Patient Polling] Request cancelled/expired')
+                            // Request was cancelled/withdrawn — reset all state
+                            setActiveRequestId(null)
+                            setRequestedDoctorIds([])
                             clearInterval(interval)
                         }
+                    } else if (res.status === 404) {
+                        console.log('[Patient Polling] Request not found (404)')
+                        // Request no longer exists
+                        setActiveRequestId(null)
+                        setRequestedDoctorIds([])
+                        clearInterval(interval)
                     }
                 } catch (err) {
-                    console.error("Failed to poll status", err)
+                    console.error("[Patient Polling] Failed to poll status", err)
                 }
-            }, 3000) // Poll every 3 seconds
+            }, 5000) // Poll every 5 seconds for faster updates
         }
 
-        return () => clearInterval(interval)
+        return () => {
+            if (interval) clearInterval(interval)
+        }
     }, [activeRequestId, acceptedDoctorId, token])
+
+    // Mount logic: fetch current active request to preserve state on refresh
+    useEffect(() => {
+        const fetchCurrentRequest = async () => {
+            if (!token) return
+            try {
+                const res = await fetch("/api/v1/patient/escalate/request/current", {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    if (data.has_active) {
+                        setActiveRequestId(data.request_id)
+                        setRequestedDoctorIds(data.requested_doctor_ids || [])
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch active request", err)
+            }
+        }
+
+        fetchCurrentRequest()
+    }, [token])
+
+    // WebSocket: instant UI update when doctor accepts or all doctors reject
+    useEffect(() => {
+        if (!token) return
+        let userId: string | null = null
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+            userId = payload.sub
+        } catch { return }
+        if (!userId) return
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const wsUrl = `${wsProtocol}://127.0.0.1:8000/api/v1/ws/patient/${userId}`
+        let ws: WebSocket | null = null
+        let reconnectTimeout: NodeJS.Timeout | null = null
+
+        const connectWs = () => {
+            ws = new WebSocket(wsUrl)
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data)
+                    console.log('[Patient WS] Received message:', msg)
+                    if (msg.type === 'request_accepted') {
+                        console.log('[Patient WS] Request accepted by doctor:', msg.accepted_by)
+                        setAcceptedDoctorId(msg.accepted_by || null)
+                        setActiveRequestId(null)
+                        setRequestedDoctorIds([])
+                    } else if (msg.type === 'request_expired') {
+                        console.log('[Patient WS] Request expired, resetting state')
+                        // All doctors rejected — revert everything to Send Request
+                        setActiveRequestId(null)
+                        setRequestedDoctorIds([])
+                    }
+                } catch (err) {
+                    console.error('[Patient WS] Error parsing message:', err)
+                }
+            }
+
+            ws.onclose = () => {
+                reconnectTimeout = setTimeout(connectWs, 3000)
+            }
+            ws.onerror = () => { ws?.close() }
+        }
+
+        connectWs()
+        return () => {
+            if (reconnectTimeout) clearTimeout(reconnectTimeout)
+            ws?.close()
+        }
+    }, [token])
+
 
     useEffect(() => {
         const fetchProfessionals = async () => {
@@ -162,6 +258,30 @@ export default function BookProfessionalPage() {
         }
     }
 
+    const withdrawDoctor = async (doctorId: string) => {
+        if (!activeRequestId) return
+        setWithdrawingDoctorIds(prev => [...prev, doctorId])
+        try {
+            const res = await fetch(
+                `/api/v1/patient/escalate/request/${activeRequestId}/withdraw-doctor/${doctorId}`,
+                { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+            )
+            if (res.ok) {
+                const data = await res.json()
+                const newRequested = requestedDoctorIds.filter(id => id !== doctorId)
+                setRequestedDoctorIds(newRequested)
+                if (data.status === "request_cancelled" || newRequested.length === 0) {
+                    setActiveRequestId(null)
+                    setRequestedDoctorIds([])
+                }
+            }
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setWithdrawingDoctorIds(prev => prev.filter(id => id !== doctorId))
+        }
+    }
+
     const filteredProfessionals = professionals.filter(doc =>
         doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         doc.specialty.toLowerCase().includes(searchQuery.toLowerCase())
@@ -228,7 +348,12 @@ export default function BookProfessionalPage() {
                                 <CardHeader className="pb-4">
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <CardTitle className="text-lg">Dr. {doctor.name}</CardTitle>
+                                            <CardTitle
+                                                className="text-lg cursor-pointer hover:underline"
+                                                onClick={() => setSelectedInfoDoctor(doctor)}
+                                            >
+                                                Dr. {doctor.name}
+                                            </CardTitle>
                                             <CardDescription className="flex items-center gap-1 mt-1 text-sm font-medium text-primary">
                                                 {doctor.specialty}
                                             </CardDescription>
@@ -252,21 +377,29 @@ export default function BookProfessionalPage() {
                                 </CardContent>
 
                                 <CardFooter className="pt-0">
-                                    <Button
-                                        variant={isRequested ? "outline" : "default"}
-                                        className={`w-full transition-all duration-300 ${isRequested ? 'bg-background border-primary text-primary hover:bg-background' : ''}`}
-                                        onClick={() => handleSendRequestClick(doctor.id)}
-                                        disabled={isRequested}
-                                    >
-                                        {isRequested ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Pending Acceptance...
-                                            </>
-                                        ) : (
-                                            "Send Request"
-                                        )}
-                                    </Button>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="outline"
+                                            className="w-1/3"
+                                            onClick={() => setSelectedInfoDoctor(doctor)}
+                                        >
+                                            View
+                                        </Button>
+                                        <Button
+                                            variant={isRequested ? "outline" : "default"}
+                                            className={`w-2/3 transition-all duration-300 ${isRequested ? 'bg-background border-destructive/50 text-destructive hover:bg-destructive/5' : ''}`}
+                                            onClick={() => isRequested ? withdrawDoctor(doctor.id) : handleSendRequestClick(doctor.id)}
+                                            disabled={withdrawingDoctorIds.includes(doctor.id)}
+                                        >
+                                            {withdrawingDoctorIds.includes(doctor.id) ? (
+                                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Withdrawing...</>
+                                            ) : isRequested ? (
+                                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Pending — Click to Withdraw</>
+                                            ) : (
+                                                "Send Request"
+                                            )}
+                                        </Button>
+                                    </div>
                                 </CardFooter>
                             </Card>
                         )
@@ -333,6 +466,69 @@ export default function BookProfessionalPage() {
                             Send Urgent Request
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Doctor Info Modal */}
+            <Dialog open={!!selectedInfoDoctor} onOpenChange={() => setSelectedInfoDoctor(null)}>
+                <DialogContent className="sm:max-w-[425px]">
+                    {selectedInfoDoctor && (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="text-xl">Dr. {selectedInfoDoctor.name}</DialogTitle>
+                                <DialogDescription className="text-primary font-medium mt-1">
+                                    {selectedInfoDoctor.specialty}
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-4">
+                                <div className="flex items-center gap-6 text-sm">
+                                    <div className="flex items-center gap-1.5">
+                                        <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
+                                        <span className="font-semibold">{selectedInfoDoctor.rating}</span>
+                                        <span className="text-muted-foreground">(120+ reviews)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="font-semibold">${selectedInfoDoctor.fee}</span>
+                                        <span className="text-muted-foreground">/ hour</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="font-semibold text-sm">About</h4>
+                                    <p className="text-sm text-muted-foreground">
+                                        Dr. {selectedInfoDoctor.name} is a highly rated {selectedInfoDoctor.specialty.toLowerCase()} with extensive
+                                        experience in trauma-informed care and cognitive behavioral therapy. They specialize in treating anxiety,
+                                        depression, and relationship issues.
+                                    </p>
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="font-semibold text-sm">Availability</h4>
+                                    <div className="bg-muted p-3 rounded-lg flex items-center gap-2 text-sm text-foreground">
+                                        <Clock className="h-4 w-4 text-muted-foreground" />
+                                        <span>Next available: <strong>{selectedInfoDoctor.next_available}</strong></span>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="font-semibold text-sm">Patient Reviews</h4>
+                                    <div className="bg-muted/50 p-3 rounded-lg text-sm italic text-muted-foreground">
+                                        "Incredibly compassionate and helpful. The strategies provided during my crisis session were exactly what I needed."
+                                    </div>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    className="w-full"
+                                    onClick={() => {
+                                        const docId = selectedInfoDoctor.id;
+                                        setSelectedInfoDoctor(null);
+                                        handleSendRequestClick(docId);
+                                    }}
+                                    disabled={requestedDoctorIds.includes(selectedInfoDoctor.id)}
+                                >
+                                    {requestedDoctorIds.includes(selectedInfoDoctor.id) ? "Request Pending" : "Send Urgent Request"}
+                                </Button>
+                            </DialogFooter>
+                        </>
+                    )}
                 </DialogContent>
             </Dialog>
 

@@ -23,7 +23,10 @@ def get_current_user(
         return payload  # {"sub": "123", "role": "patient", ...}
     except HTTPException as e:
         raise e
-    except Exception:
+    except Exception as e:
+        print(f"Token decoding error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",

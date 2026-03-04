@@ -1,19 +1,23 @@
+import os
+import httpx
 from langchain_core.tools import tool
 from .text_processing import process_user_text, get_text_emotional_context, TextFeatures
 
-# Lazy import for model fusion (heavy models)
-_model_fusion_loaded = False
-_stress_calculator = None
+MODEL_SERVER_URL = os.environ.get("MODEL_SERVER_URL", "http://localhost:6000")
 
 
-def _get_stress_calculator():
-    """Lazy load the stress calculator to avoid slow startup"""
-    global _model_fusion_loaded, _stress_calculator
-    if not _model_fusion_loaded:
-        from .model_fusion import get_stress_calculator
-        _stress_calculator = get_stress_calculator()
-        _model_fusion_loaded = True
-    return _stress_calculator
+def _call_analyze_stress(text: str) -> dict:
+    """Call the model server for stress analysis. Falls back to rule-based on error."""
+    try:
+        response = httpx.post(
+            f"{MODEL_SERVER_URL}/analyze-stress",
+            json={"text": text},
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Model server unavailable: {exc}")
 
 
 def _detect_emotion_from_features(features: TextFeatures) -> str:
@@ -178,42 +182,42 @@ def analyze_stress_deep(text: str) -> str:
     Returns: detailed stress analysis with score, emotions, and recommendations.
     """
     try:
-        calculator = _get_stress_calculator()
-        result = calculator.calculate_stress(text)
-        
-        # Format top emotions
+        result = _call_analyze_stress(text)
+        sentiment = result.get("sentiment", {})
+        emotions = result.get("emotions", {})
+        top_emotions = emotions.get("top_emotions", [])
         top_emotions_str = ', '.join([
-            f"{e} ({s:.0%})" for e, s in result.emotions.top_emotions[:3]
-        ]) if result.emotions.top_emotions else "None"
-        
+            f"{e} ({s:.0%})" for e, s in top_emotions[:3]
+        ]) if top_emotions else "None"
+
         analysis = f"""
 🔬 **Deep Stress Analysis (AI-Powered)**
 
-📊 **Stress Score:** {result.stress_score:.1%}
-📈 **Stress Level:** {result.stress_level.upper()}
+📊 **Stress Score:** {result.get('stress_score', 0):.1%}
+📈 **Stress Level:** {result.get('stress_level', 'unknown').upper()}
 
 💭 **Sentiment Analysis (Twitter-RoBERTa):**
-   • Overall: {result.sentiment.label.capitalize()} ({result.sentiment.score:.1%})
-   • Negative: {result.sentiment.all_scores.get('negative', 0):.1%}
-   • Neutral: {result.sentiment.all_scores.get('neutral', 0):.1%}
-   • Positive: {result.sentiment.all_scores.get('positive', 0):.1%}
+   • Overall: {sentiment.get('label', 'neutral').capitalize()} ({sentiment.get('score', 0):.1%})
+   • Negative: {sentiment.get('all_scores', {}).get('negative', 0):.1%}
+   • Neutral: {sentiment.get('all_scores', {}).get('neutral', 0):.1%}
+   • Positive: {sentiment.get('all_scores', {}).get('positive', 0):.1%}
 
 🎭 **Emotion Detection (GoEmotions):**
-   • Primary: {result.emotions.primary_emotion} ({result.emotions.primary_score:.1%})
+   • Primary: {emotions.get('primary_emotion', 'neutral')} ({emotions.get('primary_score', 0):.1%})
    • Top Emotions: {top_emotions_str}
 
 ⚖️ **Feature Fusion:**
-   • Sentiment Contribution: {result.sentiment_contribution:.1%}
-   • Emotion Contribution: {result.emotion_contribution:.1%}
+   • Sentiment Contribution: {result.get('sentiment_contribution', 0):.1%}
+   • Emotion Contribution: {result.get('emotion_contribution', 0):.1%}
 
-⚠️ **Stress Indicators:** {', '.join(result.stress_emotions_detected) if result.stress_emotions_detected else 'None detected'}
-💚 **Calming Signals:** {', '.join(result.calming_emotions_detected) if result.calming_emotions_detected else 'None detected'}
+⚠️ **Stress Indicators:** {', '.join(result.get('stress_emotions_detected', [])) or 'None detected'}
+💚 **Calming Signals:** {', '.join(result.get('calming_emotions_detected', [])) or 'None detected'}
 
 💡 **Recommendation:**
-{result.recommendation}
+{result.get('recommendation', '')}
 """
         return analysis.strip()
-    
+
     except Exception as e:
         return f"⚠️ Could not perform deep stress analysis: {str(e)}. Using basic emotion detection instead."
 
@@ -225,11 +229,15 @@ def get_stress_score(text: str) -> str:
     Returns stress score (0-100%) and level (low/moderate/high/severe).
     """
     try:
-        calculator = _get_stress_calculator()
-        result = calculator.calculate_stress(text)
-        
-        return f"Stress Score: {result.stress_score:.0%} | Level: {result.stress_level} | Sentiment: {result.sentiment.label} | Primary Emotion: {result.emotions.primary_emotion}"
-    
+        result = _call_analyze_stress(text)
+        sentiment = result.get("sentiment", {})
+        emotions = result.get("emotions", {})
+        return (
+            f"Stress Score: {result.get('stress_score', 0):.0%} | "
+            f"Level: {result.get('stress_level', 'unknown')} | "
+            f"Sentiment: {sentiment.get('label', 'neutral')} | "
+            f"Primary Emotion: {emotions.get('primary_emotion', 'neutral')}"
+        )
     except Exception as e:
         # Fallback to rule-based
         features = process_user_text(text)

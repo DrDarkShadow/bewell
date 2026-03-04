@@ -1,8 +1,8 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
 import os
 import sys
 
@@ -18,14 +18,33 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(c
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# Import the intern's agents
-from agent.listening_agent.transcriber import WhisperTranscriber
 from agent.listening_agent.summarizer import generate_medical_summary, generate_treatment_plan
 
 router = APIRouter(prefix="/patient/listening", tags=["Patient Listening Agent"])
 
-# Initialize transcriber once to avoid reloading model
-transcriber = WhisperTranscriber()
+# Model server URL — Whisper runs here independently (never restarts with backend)
+MODEL_SERVER_URL = os.environ.get("MODEL_SERVER_URL", "http://localhost:6000")
+
+
+async def _call_transcribe(audio_bytes: bytes, filename: str = "audio") -> str:
+    """Send audio bytes to the model server and return transcribed text."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{MODEL_SERVER_URL}/transcribe",
+                files={"audio": (filename, audio_bytes, "application/octet-stream")},
+            )
+            response.raise_for_status()
+            return response.json().get("text", "")
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail="Model server is not running. Start it with: python backend/model_server/server.py",
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Model server timed out.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Model server error: {exc}")
 
 class TreatmentPlanRequest(BaseModel):
     transcript: str
@@ -63,10 +82,7 @@ async def transcribe_and_summarize(
         audio_bytes = await uploaded.read()
         if not audio_bytes:
             continue
-        try:
-            text = transcriber.transcribe_bytes(audio_bytes)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Failed to decode audio: {exc}")
+        text = await _call_transcribe(audio_bytes, uploaded.filename or "audio")
         if text:
             lines.append(f"{speaker}: {text}")
 
@@ -113,13 +129,12 @@ async def transcribe_chunk(
     """
     audio_bytes = await audio.read()
     if not audio_bytes or len(audio_bytes) < 1000:
-        # Too small to transcribe meaningfully (< 1KB = silence/noise)
         return {"text": ""}
     try:
-        text = transcriber.transcribe_bytes(audio_bytes)
+        text = await _call_transcribe(audio_bytes, audio.filename or "chunk")
         return {"text": text or ""}
-    except Exception as exc:
-        # Don't fail the whole session on a bad chunk — just skip it
+    except HTTPException:
+        # Don't fail the real-time session on a bad chunk
         return {"text": ""}
 
 

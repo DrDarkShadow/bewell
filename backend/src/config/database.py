@@ -17,7 +17,7 @@ engine = create_engine(
     settings.DATABASE_URL,
     
     # Logging - only in development
-    echo=settings.ENVIRONMENT == "development",
+    # echo=settings.ENVIRONMENT == "development",
     
     # Connection pool configuration
     # If using Supabase Transaction Pooler, disable client-side pooling (NullPool)

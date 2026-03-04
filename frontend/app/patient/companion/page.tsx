@@ -27,7 +27,7 @@ type EmotionData = {
 
 export default function CompanionPage() {
   const router = useRouter()
-  const { token, isAuthenticated } = useAuth()
+  const { token, isAuthenticated, logout } = useAuth()
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [emotionTimeline, setEmotionTimeline] = useState<EmotionData[]>([])
@@ -71,6 +71,9 @@ export default function CompanionPage() {
               })))
               return // Successfully resumed
             }
+          } else if (res.status === 401) {
+            logout()
+            return
           }
         } catch (err) {
           console.error("Failed to fetch chat history", err)
@@ -98,6 +101,9 @@ export default function CompanionPage() {
               timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
             }
           ])
+        } else if (res.status === 401) {
+          logout()
+          return
         }
       } catch (err) {
         console.error("Failed to start chat session", err)

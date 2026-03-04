@@ -142,7 +142,7 @@ async def create_escalation_request(
             receiver = RequestReceiver(
                 id=generate_id(),
                 request_id=request_id,
-                professional_id=doc_id,
+                professional_id=int(doc_id),
                 status="pending"
             )
             db.add(receiver)
@@ -164,7 +164,7 @@ async def create_escalation_request(
                 "note": request.note,
                 "created_at": appt_request.created_at.isoformat() if appt_request.created_at else None
             }
-            await manager.send_personal_message(payload, doc_id)
+            await manager.send_personal_message(payload, int(doc_id))
         
         return {"request_id": str(request_id), "status": "pending"}
     except Exception as e:
@@ -197,7 +197,7 @@ async def add_doctor_to_request(
     # Check if doctor is already in receivers
     existing = db.query(RequestReceiver).filter(
         RequestReceiver.request_id == request_id,
-        RequestReceiver.professional_id == request.doctor_id
+        RequestReceiver.professional_id == int(request.doctor_id)
     ).first()
     
     if existing:
@@ -206,13 +206,54 @@ async def add_doctor_to_request(
     receiver = RequestReceiver(
         id=generate_id(),
         request_id=request_id,
-        professional_id=request.doctor_id,
+        professional_id=int(request.doctor_id),
         status="pending"
     )
     db.add(receiver)
     db.commit()
     
     return {"status": "added"}
+
+
+# --- 3.5. Withdraw a Doctor from Active Request ---
+@router.delete("/patient/escalate/request/{request_id}/withdraw-doctor/{doctor_id}")
+async def withdraw_doctor_from_request(
+    request_id: int,
+    doctor_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = int(current_user.get("sub"))
+    
+    # Verify request belongs to this patient and is still pending
+    appt_request = db.query(AppointmentRequest).filter(
+        AppointmentRequest.id == request_id,
+        AppointmentRequest.patient_id == user_id,
+        AppointmentRequest.status == "pending"
+    ).first()
+    
+    if not appt_request:
+        raise HTTPException(status_code=404, detail="Active request not found")
+    
+    # Delete the receiver record for this doctor
+    db.query(RequestReceiver).filter(
+        RequestReceiver.request_id == request_id,
+        RequestReceiver.professional_id == doctor_id,
+        RequestReceiver.status == "pending"
+    ).delete()
+    db.commit()
+    
+    # If no receivers remain, cancel the whole request
+    remaining = db.query(RequestReceiver).filter(
+        RequestReceiver.request_id == request_id
+    ).count()
+    
+    if remaining == 0:
+        appt_request.status = "cancelled"
+        db.commit()
+        return {"status": "request_cancelled"}
+    
+    return {"status": "withdrawn"}
 
 
 # --- 4. Polling Status for Patient ---
@@ -224,6 +265,9 @@ async def check_request_status(
 ):
     user_id = int(current_user.get("sub"))
     
+    # Use expire_all to force fresh data from database
+    db.expire_all()
+    
     appt_request = db.query(AppointmentRequest).filter(
         AppointmentRequest.id == request_id,
         AppointmentRequest.patient_id == user_id
@@ -231,6 +275,17 @@ async def check_request_status(
     
     if not appt_request:
         raise HTTPException(status_code=404, detail="Request not found")
+    
+    # If pending but no receivers remain, auto-cancel it
+    if appt_request.status == "pending":
+        remaining = db.query(RequestReceiver).filter(
+            RequestReceiver.request_id == request_id,
+            RequestReceiver.status == "pending"
+        ).count()
+        if remaining == 0:
+            appt_request.status = "cancelled"
+            db.commit()
+            db.refresh(appt_request)
         
     accepted_by = None
     if appt_request.status == "fulfilled":
@@ -248,13 +303,51 @@ async def check_request_status(
     }
 
 
+# --- 4.5. Get Current Active Request for Patient ---
+@router.get("/patient/escalate/request/current")
+async def get_current_escalation_request(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = int(current_user.get("sub"))
+    
+    appt_request = db.query(AppointmentRequest).filter(
+        AppointmentRequest.patient_id == user_id,
+        AppointmentRequest.status == "pending"
+    ).first()
+    
+    if not appt_request:
+        return {"has_active": False}
+        
+    # Return only PENDING receivers — rejected ones should revert to "Send Request"
+    receivers = db.query(RequestReceiver).filter(
+        RequestReceiver.request_id == appt_request.id,
+        RequestReceiver.status == "pending"
+    ).all()
+    
+    # If no pending receivers remain (all rejected/withdrawn), treat as no active request
+    if not receivers:
+        appt_request.status = "expired"
+        db.commit()
+        return {"has_active": False}
+    
+    return {
+        "has_active": True,
+        "request_id": str(appt_request.id),
+        "requested_doctor_ids": [str(r.professional_id) for r in receivers]
+    }
+
+
 # --- 5. Get Active Pending Requests for a Doctor ---
 @router.get("/doctor/escalate/requests")
 async def get_doctor_requests(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_professional)
 ):
-    user_id = current_user.get("user_id") if isinstance(current_user, dict) else current_user.id
+    user_id = int(current_user.get("sub")) if isinstance(current_user, dict) else current_user.id
+    
+    # Force fresh data from database
+    db.expire_all()
     
     # Get all pending receivers for this doctor
     receivers = db.query(RequestReceiver).filter(
@@ -281,6 +374,10 @@ async def get_doctor_requests(
                 "note": req.patient_note,
                 "created_at": req.created_at.isoformat()
             })
+        else:
+            # Master request is no longer pending, mark this receiver as rejected
+            r.status = "rejected"
+            db.commit()
             
     return results
 
@@ -292,60 +389,174 @@ async def doctor_accept_request(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_professional)
 ):
-    user_id = current_user.get("user_id") if isinstance(current_user, dict) else current_user.id
-    
-    # Find master request
-    appt_request = db.query(AppointmentRequest).filter(
-        AppointmentRequest.id == request_id,
-        AppointmentRequest.status == "pending"
-    ).with_for_update().first() # Lock the row to prevent race conditions
-    
-    if not appt_request:
-        raise HTTPException(status_code=400, detail="Request is no longer available or already fulfilled")
+    try:
+        user_id = int(current_user.get("sub")) if isinstance(current_user, dict) else current_user.id
         
-    # Mark master as fulfilled
-    appt_request.status = "fulfilled"
+        print(f"[Accept] Doctor {user_id} attempting to accept request {request_id}")
+        
+        # Find master request (removed with_for_update for SQLite compatibility)
+        appt_request = db.query(AppointmentRequest).filter(
+            AppointmentRequest.id == request_id,
+            AppointmentRequest.status == "pending"
+        ).first()
+        
+        if not appt_request:
+            print(f"[Accept] Request {request_id} not found or not pending")
+            raise HTTPException(status_code=400, detail="Request is no longer available or already fulfilled")
+        
+        print(f"[Accept] Found request {request_id}, patient_id={appt_request.patient_id}")
+        
+        # Verify this doctor actually has a pending receiver for this request
+        my_receiver = db.query(RequestReceiver).filter(
+            RequestReceiver.request_id == request_id,
+            RequestReceiver.professional_id == user_id,
+            RequestReceiver.status == "pending"
+        ).first()
+        
+        if not my_receiver:
+            print(f"[Accept] Doctor {user_id} has no pending receiver for request {request_id}")
+            raise HTTPException(status_code=400, detail="You don't have a pending request for this appointment")
+        
+        print(f"[Accept] Doctor {user_id} has valid pending receiver")
+            
+        # Mark master as fulfilled
+        appt_request.status = "fulfilled"
+        
+        # Get all receivers for this request
+        all_receivers = db.query(RequestReceiver).filter(
+            RequestReceiver.request_id == request_id
+        ).all()
+        
+        print(f"[Accept] Found {len(all_receivers)} receivers to update")
+        
+        # Update each receiver individually to avoid synchronize_session issues
+        for receiver in all_receivers:
+            if receiver.professional_id == user_id:
+                receiver.status = "accepted"
+            else:
+                receiver.status = "rejected"
+        
+        print(f"[Accept] Creating appointment...")
+        
+        # Create the final appointment
+        from datetime import timedelta
+        new_appt = Appointment(
+            id=generate_id(),
+            patient_id=appt_request.patient_id,
+            professional_id=user_id,
+            request_id=request_id,
+            scheduled_at=datetime.utcnow() + timedelta(days=1),
+            patient_notes=appt_request.patient_note,
+            therapist_notes=appt_request.encrypted_summary,
+            status="confirmed",
+            appointment_type="therapy",
+            duration_minutes=60
+        )
+        db.add(new_appt)
+        
+        print(f"[Accept] Committing changes...")
+        
+        # Commit all changes before sending notifications
+        db.commit()
+        db.refresh(appt_request)
+        db.refresh(new_appt)
+        
+        print(f"[Accept] Appointment {new_appt.id} created successfully")
+        
+        # Fetch doctor name for notification
+        doctor = db.query(User).filter(User.id == user_id).first()
+        doctor_name = doctor.name if doctor else "Your Doctor"
+        
+        print(f"[Accept] Sending WebSocket notifications...")
+        
+        # Notify the patient in real-time via WebSocket
+        await manager.send_personal_message({
+            "type": "request_accepted",
+            "request_id": str(request_id),
+            "doctor_name": doctor_name,
+            "appointment_id": str(new_appt.id),
+            "accepted_by": str(user_id)
+        }, appt_request.patient_id)
+        
+        # Notify all doctors who had this request so they remove the card
+        for recv in all_receivers:
+            # Notify ALL doctors including the one who accepted (for UI consistency)
+            await manager.send_personal_message({
+                "type": "request_fulfilled",
+                "request_id": str(request_id)
+            }, recv.professional_id)
+        
+        print(f"[Accept] Success! Returning response")
+        
+        return {"status": "success", "appointment_id": str(new_appt.id)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"ERROR IN ACCEPT ENDPOINT: {error_trace}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+# --- 6.5. Doctor Rejects the Request ---
+@router.post("/doctor/escalate/request/{request_id}/reject")
+async def doctor_reject_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_professional)
+):
+    user_id = int(current_user.get("sub")) if isinstance(current_user, dict) else current_user.id
     
-    # Mark all receivers as rejected first
-    db.query(RequestReceiver).filter(RequestReceiver.request_id == request_id).update({"status": "rejected"})
-    
-    # Then mark this doctor's receiver as accepted
+    # Mark this doctor's receiver as rejected
     db.query(RequestReceiver).filter(
         RequestReceiver.request_id == request_id, 
-        RequestReceiver.professional_id == user_id
-    ).update({"status": "accepted"})
+        RequestReceiver.professional_id == user_id,
+        RequestReceiver.status == "pending"
+    ).update({"status": "rejected"})
     
-    # Create the final appointment
-    # We schedule it slightly in the future as a placeholder (e.g. tomorrow)
-    # The actual system might let doctors pick available slots
-    from datetime import timedelta
-    new_appt = Appointment(
-        id=generate_id(),
-        patient_id=appt_request.patient_id,
-        professional_id=user_id,
-        request_id=request_id,
-        scheduled_at=datetime.utcnow() + timedelta(days=1),
-        patient_notes=appt_request.patient_note,
-        therapist_notes=appt_request.encrypted_summary, # Provide the decrypted summary to the therapist
-        status="confirmed"
-    )
-    db.add(new_appt)
     db.commit()
     
-    return {"status": "success", "appointment_id": str(new_appt.id)}
+    # Check if ALL receivers have now rejected — if so, notify the patient
+    remaining = db.query(RequestReceiver).filter(
+        RequestReceiver.request_id == request_id,
+        RequestReceiver.status == "pending"
+    ).count()
+    
+    if remaining == 0:
+        appt_request = db.query(AppointmentRequest).filter(
+            AppointmentRequest.id == request_id
+        ).first()
+        if appt_request and appt_request.status == "pending":
+            appt_request.status = "expired"
+            db.commit()
+            await manager.send_personal_message({
+                "type": "request_expired",
+                "request_id": str(request_id)
+            }, appt_request.patient_id)
+    
+    return {"status": "success"}
 
 
 # --- 7. Doctor WebSocket Endpoint ---
 @router.websocket("/ws/doctor/{user_id}")
 async def doctor_websocket(websocket: WebSocket, user_id: int):
-    """
-    WebSocket for real-time notifications for the doctor dashboard.
-    """
     await manager.connect(websocket, user_id)
     try:
         while True:
             data = await websocket.receive_text()
-            # We can handle ping/pong or client messages here if needed.
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, user_id)
+
+
+# --- 7.5. Patient WebSocket Endpoint ---
+@router.websocket("/ws/patient/{user_id}")
+async def patient_websocket(websocket: WebSocket, user_id: int):
+    await manager.connect(websocket, user_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket, user_id)
 
@@ -356,7 +567,7 @@ async def get_doctor_dashboard_data(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_professional)
 ):
-    user_id = current_user.get("user_id") if isinstance(current_user, dict) else current_user.id
+    user_id = int(current_user.get("sub")) if isinstance(current_user, dict) else current_user.id
     
     # 1. Active Patients / Recent Patients
     # We find unique patients from Appointments.
@@ -420,3 +631,36 @@ async def get_doctor_dashboard_data(
         "flaggedAlerts": 0,
         "aiSummariesReady": len(recent_patients) # just a proxy stat
     }
+
+
+# --- 9. Get Patient Appointments ---
+@router.get("/patient/appointments")
+async def get_patient_appointments(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = int(current_user.get("sub"))
+    
+    # Get all appointments for this patient
+    appointments = db.query(Appointment).filter(
+        Appointment.patient_id == user_id
+    ).order_by(desc(Appointment.scheduled_at)).all()
+    
+    results = []
+    for appt in appointments:
+        # Fetch doctor details
+        doctor = db.query(User).filter(User.id == appt.professional_id).first()
+        doc_profile = db.query(ProfessionalProfile).filter(ProfessionalProfile.user_id == appt.professional_id).first()
+        
+        results.append({
+            "id": str(appt.id),
+            "doctor_id": str(appt.professional_id),
+            "doctor_name": doctor.name if doctor else "Unknown",
+            "specialty": doc_profile.specialization if doc_profile else "Therapist",
+            "scheduled_at": appt.scheduled_at.isoformat() if appt.scheduled_at else None,
+            "status": appt.status,
+            "type": appt.appointment_type,
+            "duration_minutes": appt.duration_minutes
+        })
+        
+    return results
