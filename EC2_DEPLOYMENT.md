@@ -226,7 +226,9 @@ curl http://localhost:8000/docs
 
 ## Part 4: Production Setup with Systemd
 
-### Step 1: Create Systemd Service
+### Step 1: Create Systemd Services
+
+#### Main Backend Service
 
 ```bash
 # Create service file
@@ -238,7 +240,37 @@ Add this content:
 ```ini
 [Unit]
 Description=BeWell Backend API
-After=network.target postgresql.service
+After=network.target bewell-model-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bewell/backend
+Environment="PATH=/home/ubuntu/bewell/backend/venv/bin"
+Environment="MODEL_SERVER_URL=http://localhost:6000"
+EnvironmentFile=/home/ubuntu/bewell/backend/.env
+ExecStart=/home/ubuntu/bewell/backend/venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=always
+RestartSec=10
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Model Server Service (for Whisper + ML Models)
+
+```bash
+# Create model server service file
+sudo nano /etc/systemd/system/bewell-model-server.service
+```
+
+Add this content:
+
+```ini
+[Unit]
+Description=BeWell Model Server (Whisper + ML Models)
+After=network.target
 
 [Service]
 Type=simple
@@ -246,32 +278,41 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/bewell/backend
 Environment="PATH=/home/ubuntu/bewell/backend/venv/bin"
 EnvironmentFile=/home/ubuntu/bewell/backend/.env
-ExecStart=/home/ubuntu/bewell/backend/venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
+ExecStart=/home/ubuntu/bewell/backend/venv/bin/python model_server/server.py
 Restart=always
 RestartSec=10
+MemoryMax=1.5G
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-### Step 2: Start Service
+### Step 2: Start Services
 
 ```bash
 # Reload systemd
 sudo systemctl daemon-reload
 
-# Enable service (start on boot)
+# Start model server first (backend depends on it)
+sudo systemctl enable bewell-model-server
+sudo systemctl start bewell-model-server
+sudo systemctl status bewell-model-server
+
+# Then start main backend
 sudo systemctl enable bewell
-
-# Start service
 sudo systemctl start bewell
-
-# Check status
 sudo systemctl status bewell
 
 # View logs
-sudo journalctl -u bewell -f
+sudo journalctl -u bewell-model-server -f  # Model server logs
+sudo journalctl -u bewell -f              # Backend logs
 ```
+
+**Important Notes:**
+- Model server must start before backend (backend depends on it for listening agent)
+- Model server runs on port 6000 (internal only, not exposed via Nginx)
+- Backend runs on port 8000 (exposed via Nginx)
+- Total memory usage: ~2.5GB (1.5GB model server + 1GB backend)
 
 ---
 

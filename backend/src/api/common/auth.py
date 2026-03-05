@@ -48,7 +48,7 @@ class AuthResponse(BaseModel):
 
 # ========== Local Auth Endpoints (Active Now) ==========
 
-@router.post("/local/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def local_signup(request: SignupRequest, db: Session = Depends(get_db)):
     """
     Local Signup (Dev Only)
@@ -63,7 +63,7 @@ def local_signup(request: SignupRequest, db: Session = Depends(get_db)):
         phone=request.phone
     )
 
-@router.post("/local/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse)
 def local_login(request: LoginRequest, db: Session = Depends(get_db)):
     """
     Local Login (Dev Only)
