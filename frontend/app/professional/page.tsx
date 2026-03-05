@@ -92,8 +92,10 @@ export default function ProfessionalDashboard() {
     const userId = user?.id
     if (!userId) return
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const wsUrl = `${wsProtocol}://127.0.0.1:8000/api/v1/ws/doctor/${userId}`
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const wsProtocol = apiUrl.startsWith('https') ? 'wss' : 'ws'
+    const wsHost = apiUrl.replace(/^https?:\/\//, '')
+    const wsUrl = `${wsProtocol}://${wsHost}/api/v1/ws/doctor/${userId}`
     let ws: WebSocket | null = null
     let reconnectTimeout: NodeJS.Timeout | null = null
 
